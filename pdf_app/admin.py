@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Topic, Subject, PDFFile
+from .models import Feedback, Topic, Subject, PDFFile
 from django.urls import reverse
 
 @admin.register(Topic)
@@ -56,3 +56,14 @@ class PDFFileAdmin(admin.ModelAdmin):
             return format_html('<a href="{}" target="_blank">View PDF</a>', obj.file.url)
         return "-"
     file_link.short_description = 'File'
+
+
+@admin.register(Feedback)
+class FeedbackAdmin(admin.ModelAdmin):
+    list_display = ['name', 'description_short', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['name', 'description']
+    
+    def description_short(self, obj):
+        return obj.description[:50] + '...' if len(obj.description) > 50 else obj.description
+    description_short.short_description = 'Description'

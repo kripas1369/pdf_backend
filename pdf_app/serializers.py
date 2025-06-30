@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Topic, Subject, PDFFile
+from .models import Feedback, Topic, Subject, PDFFile
 
 class TopicSerializer(serializers.ModelSerializer):
     class Meta:
@@ -19,3 +19,9 @@ class PDFFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = PDFFile
         fields = ['id', 'title', 'subtitle', 'year', 'file']
+
+        # Add to your existing serializers.py
+class FeedbackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Feedback
+        fields = ['id', 'name', 'description', 'created_at']

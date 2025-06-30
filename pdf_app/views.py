@@ -1,6 +1,6 @@
 from rest_framework import viewsets, generics
-from .models import Topic, Subject, PDFFile
-from .serializers import (TopicSerializer, SubjectSerializer, 
+from .models import Feedback, Topic, Subject, PDFFile
+from .serializers import (FeedbackSerializer, TopicSerializer, SubjectSerializer, 
                          YearSerializer, PDFFileSerializer)
 from django.db.models import Count
 
@@ -33,3 +33,11 @@ class PDFsBySubjectAndYearView(generics.ListAPIView):
         subject_id = self.kwargs['subject_id']
         year = self.kwargs['year']
         return PDFFile.objects.filter(subject_id=subject_id, year=year)
+    
+class FeedbackCreateView(generics.CreateAPIView):
+    queryset = Feedback.objects.all()
+    serializer_class = FeedbackSerializer
+
+class FeedbackListView(generics.ListAPIView):
+    queryset = Feedback.objects.all().order_by('-created_at')
+    serializer_class = FeedbackSerializer
