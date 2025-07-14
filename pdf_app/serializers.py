@@ -18,10 +18,14 @@ class YearSerializer(serializers.Serializer):
 class PDFFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = PDFFile
-        fields = ['id', 'title', 'subtitle', 'year', 'file']
+        fields = ['id', 'title', 'subtitle', 'year', 'file', 'is_solution']
 
-        # Add to your existing serializers.py
 class FeedbackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Feedback
         fields = ['id', 'name', 'description', 'created_at']
+
+# Add this new serializer for grouped PDFs (questions with solutions)
+class PDFGroupSerializer(serializers.Serializer):
+    question = PDFFileSerializer()
+    solution = PDFFileSerializer(required=False)  # Not all questions have solutions

@@ -33,29 +33,30 @@ class SubjectAdmin(admin.ModelAdmin):
 
 @admin.register(PDFFile)
 class PDFFileAdmin(admin.ModelAdmin):
-    list_display = ['title', 'year', 'subject_link', 'file_link']
-    list_filter = ['year', 'subject__topic', 'subject']
+    list_display = ['title', 'year', 'subject_link', 'file_link', 'is_solution']
+    list_editable = ['is_solution']
+    list_filter = ['year', 'subject__topic', 'subject', 'is_solution']  # Already has is_solution filter
     search_fields = ['title', 'subject__name']
-    
     fieldsets = (
         ('Basic Info', {
             'fields': ('title', 'subtitle', 'year')
         }),
         ('Relationships', {
-            'fields': ('subject', 'file')
+            'fields': ('subject', 'file', 'is_solution')  # 👈 Show checkbox inside the form too
         }),
     )
-    
+
     def subject_link(self, obj):
         url = reverse('admin:pdf_app_subject_change', args=[obj.subject.id])
         return format_html('<a href="{}">{}</a>', url, obj.subject.name)
     subject_link.short_description = 'Subject'
-    
+
     def file_link(self, obj):
         if obj.file:
             return format_html('<a href="{}" target="_blank">View PDF</a>', obj.file.url)
         return "-"
     file_link.short_description = 'File'
+
 
 
 @admin.register(Feedback)

@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'pdf_app',
+    'solution_pdf',
     'corsheaders',
 ]
 
