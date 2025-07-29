@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Feedback, Topic, Subject, PDFFile
+from .models import Feedback, Topic, Subject, PDFFile, UserQuery
 
 class TopicSerializer(serializers.ModelSerializer):
     class Meta:
@@ -18,14 +18,17 @@ class YearSerializer(serializers.Serializer):
 class PDFFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = PDFFile
-        fields = ['id', 'title', 'subtitle', 'year', 'file', 'is_solution']
+        fields = ['id', 'title', 'subtitle', 'year', 'file']
 
+        # Add to your existing serializers.py
 class FeedbackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Feedback
         fields = ['id', 'name', 'description', 'created_at']
 
-# Add this new serializer for grouped PDFs (questions with solutions)
-class PDFGroupSerializer(serializers.Serializer):
-    question = PDFFileSerializer()
-    solution = PDFFileSerializer(required=False)  # Not all questions have solutions
+
+class UserQuerySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserQuery
+        fields = ['id', 'name', 'email', 'topic', 'submitted_at']
+        read_only_fields = ['submitted_at']

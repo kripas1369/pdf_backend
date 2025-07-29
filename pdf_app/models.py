@@ -19,8 +19,7 @@ class PDFFile(models.Model):
     year = models.PositiveIntegerField()
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='pdfs')
     file = models.FileField(upload_to='pdfs/')
-    is_solution = models.BooleanField(default=False)  # 👈 NEW FIELD
-
+    is_solution = models.BooleanField(default=False)  # Add this field
     
     def __str__(self):
         return f"{self.title} ({self.year})"
@@ -33,3 +32,15 @@ class Feedback(models.Model):
     
     def __str__(self):
         return f"Feedback from {self.name}"
+    # models.py
+
+# from django.db import models
+
+class UserQuery(models.Model):
+    name = models.CharField(max_length=100)
+    email = models.EmailField()
+    topic = models.ForeignKey('Topic', on_delete=models.CASCADE)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.email}) - {self.topic.name}"

@@ -5,6 +5,7 @@ from .views import (
     FeedbackListView,
     TopicViewSet,
     SubjectByTopicView,
+    UserQueryCreateView,
     YearListBySubjectView,
     PDFsBySubjectAndYearView
 )
@@ -22,4 +23,6 @@ urlpatterns = [
     path('subjects/<int:subject_id>/years/<int:year>/pdfs/', PDFsBySubjectAndYearView.as_view(), name='pdfs-by-subject-year'),
     path('feedback/', FeedbackCreateView.as_view(), name='create-feedback'),
     path('feedback/list/', FeedbackListView.as_view(), name='list-feedback'),
+    path('user-query/', UserQueryCreateView.as_view(), name='user-query-create'),
+
 ]

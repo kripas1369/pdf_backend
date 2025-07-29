@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Feedback, Topic, Subject, PDFFile
+from .models import Feedback, Topic, Subject, PDFFile, UserQuery
 from django.urls import reverse
 
 @admin.register(Topic)
@@ -68,3 +68,9 @@ class FeedbackAdmin(admin.ModelAdmin):
     def description_short(self, obj):
         return obj.description[:50] + '...' if len(obj.description) > 50 else obj.description
     description_short.short_description = 'Description'
+
+@admin.register(UserQuery)
+class UserQueryAdmin(admin.ModelAdmin):
+    list_display = ['name', 'email', 'topic', 'submitted_at']
+    search_fields = ['name', 'email']
+    list_filter = ['topic', 'submitted_at']

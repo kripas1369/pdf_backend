@@ -1,6 +1,6 @@
 from rest_framework import viewsets, generics
-from .models import Feedback, Topic, Subject, PDFFile
-from .serializers import (FeedbackSerializer, PDFGroupSerializer, TopicSerializer, SubjectSerializer, 
+from .models import Feedback, Topic, Subject, PDFFile, UserQuery
+from .serializers import (FeedbackSerializer, TopicSerializer, SubjectSerializer, UserQuerySerializer, 
                          YearSerializer, PDFFileSerializer)
 from django.db.models import Count
 
@@ -42,35 +42,6 @@ class FeedbackListView(generics.ListAPIView):
     queryset = Feedback.objects.all().order_by('-created_at')
     serializer_class = FeedbackSerializer
 
-class PDFsBySubjectAndYearView(generics.ListAPIView):
-    serializer_class = PDFGroupSerializer  # Changed from PDFFileSerializer
-
-    def get_queryset(self):
-        subject_id = self.kwargs['subject_id']
-        year = self.kwargs['year']
-        
-        # Get all PDFs for this subject and year
-        pdfs = PDFFile.objects.filter(subject_id=subject_id, year=year)
-        
-        # Group questions with their solutions
-        result = []
-        questions = pdfs.filter(is_solution=False)
-        
-        for question in questions:
-            # Try to find a solution for this question
-            solution = pdfs.filter(
-                is_solution=True,
-                title=question.title  # Assuming same title means they're paired
-            ).first()
-            
-            result.append({
-                'question': question,
-                'solution': solution
-            })
-        
-        return result
-
-    def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+class UserQueryCreateView(generics.CreateAPIView):
+    queryset = UserQuery.objects.all()
+    serializer_class = UserQuerySerializer
