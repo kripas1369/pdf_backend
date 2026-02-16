@@ -1036,3 +1036,235 @@ class UserQueryCreateView(generics.CreateAPIView):
     queryset = UserQuery.objects.all()
     serializer_class = UserQuerySerializer
     permission_classes = [AllowAny]
+
+
+# ============================================
+# NOTIFICATION VIEWS (all user notifications; pin / save for later)
+# ============================================
+
+class NotificationListView(generics.ListAPIView):
+    """
+    GET /api/notifications/
+    List current user's notifications. Query params: ?pinned_only=1, ?unread_only=1
+    """
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Notification.objects.filter(user=self.request.user).select_related('subject')
+        if self.request.query_params.get('pinned_only') == '1':
+            qs = qs.filter(is_pinned=True)
+        if self.request.query_params.get('unread_only') == '1':
+            qs = qs.filter(is_read=False)
+        return qs.order_by('-created_at')
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def notification_update(request, pk):
+    """
+    PATCH /api/notifications/<id>/
+    Mark as read and/or pin (save for later). Body: { "is_read": true, "is_pinned": true }
+    """
+    notification = get_object_or_404(Notification, pk=pk, user=request.user)
+    serializer = NotificationUpdateSerializer(data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    if 'is_read' in serializer.validated_data:
+        notification.is_read = serializer.validated_data['is_read']
+    if 'is_pinned' in serializer.validated_data:
+        notification.is_pinned = serializer.validated_data['is_pinned']
+    notification.save()
+    return Response(NotificationSerializer(notification).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def notification_mark_read(request, pk):
+    """POST /api/notifications/<id>/mark-read/ - mark single notification as read."""
+    notification = get_object_or_404(Notification, pk=pk, user=request.user)
+    notification.is_read = True
+    notification.save()
+    return Response(NotificationSerializer(notification).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def notification_pin(request, pk):
+    """POST /api/notifications/<id>/pin/ - pin (save for later)."""
+    notification = get_object_or_404(Notification, pk=pk, user=request.user)
+    notification.is_pinned = True
+    notification.save()
+    return Response(NotificationSerializer(notification).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def notification_unpin(request, pk):
+    """POST /api/notifications/<id>/unpin/ - unpin."""
+    notification = get_object_or_404(Notification, pk=pk, user=request.user)
+    notification.is_pinned = False
+    notification.save()
+    return Response(NotificationSerializer(notification).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def notification_unread_count(request):
+    """GET /api/notifications/unread-count/ - count of unread notifications (for badge)."""
+    count = Notification.objects.filter(user=request.user, is_read=False).count()
+    return Response({'unread_count': count})
+
+
+# ============================================
+# SUBJECT ROUTINE VIEWS (routine per subject; start/pin reminder)
+# ============================================
+
+class SubjectRoutineListView(generics.ListAPIView):
+    """
+    GET /api/subjects/<subject_id>/routines/
+    List routines for a subject (for student). Optional ?day=0..6 to filter by day.
+    """
+    serializer_class = SubjectRoutineSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        subject_id = self.kwargs.get('subject_id')
+        subject = get_object_or_404(Subject, pk=subject_id)
+        qs = SubjectRoutine.objects.filter(subject=subject).select_related('subject')
+        day = self.request.query_params.get('day')
+        if day is not None:
+            try:
+                day = int(day)
+                if 0 <= day <= 6:
+                    qs = qs.filter(day_of_week=day)
+            except ValueError:
+                pass
+        return qs.order_by('day_of_week', 'order', 'start_time')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def routine_start_reminder(request, routine_id):
+    """
+    POST /api/routines/<routine_id>/start-reminder/
+    User subscribes to get notified before this routine (e.g. "Notify me 15 min before").
+    Body: { "notify_minutes_before": 15 } (optional, default 15).
+    """
+    routine = get_object_or_404(SubjectRoutine, pk=routine_id)
+    notify_minutes = request.data.get('notify_minutes_before', 15)
+    if not isinstance(notify_minutes, int) or notify_minutes < 1 or notify_minutes > 1440:
+        notify_minutes = 15
+    reminder, created = UserRoutineReminder.objects.get_or_create(
+        user=request.user,
+        routine=routine,
+        defaults={'notify_minutes_before': notify_minutes},
+    )
+    if not created:
+        reminder.notify_minutes_before = notify_minutes
+        reminder.save()
+    return Response(
+        UserRoutineReminderSerializer(reminder, context={'request': request}).data,
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def routine_stop_reminder(request, routine_id):
+    """POST /api/routines/<routine_id>/stop-reminder/ - stop reminder for this routine."""
+    routine = get_object_or_404(SubjectRoutine, pk=routine_id)
+    deleted, _ = UserRoutineReminder.objects.filter(user=request.user, routine=routine).delete()
+    return Response({
+        'message': 'Reminder stopped' if deleted else 'No reminder was set',
+        'routine_id': routine_id,
+    })
+
+
+class MyRoutineRemindersView(generics.ListAPIView):
+    """
+    GET /api/routines/my-reminders/
+    List routines the user has pinned (started reminder) for later notification.
+    """
+    serializer_class = UserRoutineReminderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return UserRoutineReminder.objects.filter(user=self.request.user).select_related('routine', 'routine__subject').order_by('-created_at')
+
+
+# ============================================
+# FEED POST (image, title, description; user can like)
+# ============================================
+
+class FeedPostListView(generics.ListAPIView):
+    """
+    GET /api/feed/
+    List active feed posts (image, title, description). Optional auth: if logged in, is_liked is set.
+    """
+    serializer_class = FeedPostSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        qs = FeedPost.objects.filter(is_active=True)
+        user = getattr(self.request, 'user', None)
+        if user and user.is_authenticated:
+            # Annotate so we know if current user liked each post
+            qs = qs.annotate(
+                _like_count=Count('likes'),
+                _is_liked=Exists(FeedPostLike.objects.filter(post=OuterRef('pk'), user=user)),
+            )
+        else:
+            qs = qs.annotate(_like_count=Count('likes'))
+        return qs.order_by('-created_at')
+
+
+class FeedPostDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/feed/<id>/
+    Single feed post with like_count and is_liked (if authenticated).
+    """
+    serializer_class = FeedPostSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        qs = FeedPost.objects.filter(is_active=True)
+        user = getattr(self.request, 'user', None)
+        if user and user.is_authenticated:
+            qs = qs.annotate(
+                _like_count=Count('likes'),
+                _is_liked=Exists(FeedPostLike.objects.filter(post=OuterRef('pk'), user=user)),
+            )
+        else:
+            qs = qs.annotate(_like_count=Count('likes'))
+        return qs
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def feed_post_like(request, pk):
+    """
+    POST /api/feed/<id>/like/
+    Like the post (idempotent: already liked is 200).
+    """
+    post = get_object_or_404(FeedPost, pk=pk, is_active=True)
+    _, created = FeedPostLike.objects.get_or_create(user=request.user, post=post)
+    return Response(
+        FeedPostSerializer(post, context={'request': request}).data,
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def feed_post_unlike(request, pk):
+    """
+    POST /api/feed/<id>/unlike/
+    Remove like. Returns updated post.
+    """
+    post = get_object_or_404(FeedPost, pk=pk, is_active=True)
+    deleted, _ = FeedPostLike.objects.filter(user=request.user, post=post).delete()
+    return Response(
+        FeedPostSerializer(post, context={'request': request}).data,
+        status=status.HTTP_200_OK,
+    )

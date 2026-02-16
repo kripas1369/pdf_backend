@@ -935,6 +935,148 @@ admin.site.register(UserActivity)
 
 
 # ========================================
+# NOTIFICATIONS (send to all users; user can pin / save for later)
+# ========================================
+
+class NotificationAdminForm(forms.ModelForm):
+    """Add option to send one notification to all users."""
+    send_to_all = forms.BooleanField(
+        required=False,
+        initial=False,
+        label='Send to all users',
+        help_text='If checked, this notification will be created for every active user (user field is ignored).',
+    )
+
+    class Meta:
+        model = Notification
+        fields = ['user', 'title', 'body', 'subject', 'action_url']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['user'].required = False
+        if self.instance and self.instance.pk:
+            self.fields['send_to_all'].widget = forms.HiddenInput()
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    form = NotificationAdminForm
+    list_display = ['id', 'title_short', 'user', 'subject', 'is_read', 'is_pinned', 'created_at']
+    list_filter = ['is_read', 'is_pinned', 'subject', 'created_at']
+    search_fields = ['title', 'body', 'user__phone']
+    raw_id_fields = ['user', 'subject']
+    readonly_fields = ['created_at']
+    date_hierarchy = 'created_at'
+
+    def get_fieldsets(self, request, obj=None):
+        if obj is None:
+            return (
+                (None, {'fields': ('user', 'send_to_all', 'title', 'body', 'subject', 'action_url')}),
+            )
+        return super().get_fieldsets(request, obj)
+
+    def title_short(self, obj):
+        return (obj.title[:50] + '...') if obj.title and len(obj.title) > 50 else (obj.title or '-')
+    title_short.short_description = 'Title'
+
+    def save_model(self, request, obj, form, change):
+        if not change and form.cleaned_data.get('send_to_all'):
+            users = User.objects.filter(is_active=True)
+            count = 0
+            for u in users:
+                Notification.objects.create(
+                    user=u,
+                    title=obj.title,
+                    body=obj.body or '',
+                    subject=obj.subject,
+                    action_url=obj.action_url or '',
+                )
+                count += 1
+            self.message_user(request, f'Created {count} notifications for all users.', messages.SUCCESS)
+            return
+        if not obj.user_id and not form.cleaned_data.get('send_to_all'):
+            self.message_user(request, 'Either select a user or check "Send to all users".', messages.ERROR)
+            return
+        super().save_model(request, obj, form, change)
+
+
+# ========================================
+# SUBJECT ROUTINE (per-subject schedule; user can start reminder)
+# ========================================
+
+@admin.register(SubjectRoutine)
+class SubjectRoutineAdmin(admin.ModelAdmin):
+    list_display = ['id', 'subject', 'day_of_week', 'start_time', 'end_time', 'title', 'order']
+    list_filter = ['subject', 'day_of_week']
+    search_fields = ['title', 'description', 'subject__name']
+    list_editable = ['order']
+
+
+@admin.register(UserRoutineReminder)
+class UserRoutineReminderAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user_phone', 'routine_display', 'notify_minutes_before', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['user__phone', 'routine__title']
+    raw_id_fields = ['user', 'routine']
+
+    def user_phone(self, obj):
+        return obj.user.phone if obj.user else '-'
+    user_phone.short_description = 'User'
+
+    def routine_display(self, obj):
+        if obj.routine:
+            return f'{obj.routine.subject.name} – {obj.routine.get_day_of_week_display()} {obj.routine.start_time}'
+        return '-'
+    routine_display.short_description = 'Routine'
+
+
+# ========================================
+# FEED POST (image, title, description; user can like)
+# ========================================
+
+@admin.register(FeedPost)
+class FeedPostAdmin(admin.ModelAdmin):
+    list_display = ['id', 'image_preview', 'title_short', 'like_count_display', 'is_active', 'created_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['title', 'description']
+    list_editable = ['is_active']
+    readonly_fields = ['image_preview', 'created_at', 'updated_at']
+
+    def image_preview(self, obj):
+        if obj and obj.pk and obj.image:
+            return format_html(
+                '<img src="{}" style="max-width:80px;height:auto;border-radius:6px;"/>',
+                obj.image.url
+            )
+        return '–'
+    image_preview.short_description = 'Image'
+
+    def title_short(self, obj):
+        return (obj.title[:40] + '...') if obj.title and len(obj.title) > 40 else (obj.title or '–')
+    title_short.short_description = 'Title'
+
+    def like_count_display(self, obj):
+        return obj.likes.count() if obj.pk else 0
+    like_count_display.short_description = 'Likes'
+
+
+@admin.register(FeedPostLike)
+class FeedPostLikeAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user_phone', 'post_title', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['user__phone', 'post__title']
+    raw_id_fields = ['user', 'post']
+
+    def user_phone(self, obj):
+        return obj.user.phone if obj.user else '–'
+    user_phone.short_description = 'User'
+
+    def post_title(self, obj):
+        return (obj.post.title[:50] + '...') if obj.post and len(obj.post.title) > 50 else (obj.post.title if obj.post else '–')
+    post_title.short_description = 'Post'
+
+
+# ========================================
 # ADMIN SITE CUSTOMIZATION
 # ========================================
 

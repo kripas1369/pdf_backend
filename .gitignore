@@ -5,11 +5,10 @@ __pycache__/
 *.so
 .Python
 
-# Django
-db.sqlite3
-db.sqlite3-journal
+# Django (db.sqlite3 is tracked; media/ is not)
 media/
 staticfiles/
+solution_pdfs/
 *.log
 debug.log
 

@@ -717,3 +717,101 @@ class CollegeLeaderboardSerializer(serializers.ModelSerializer):
             'id', 'name', 'name_nepali', 'location',
             'total_students', 'rank', 'rank_change'
         ]
+
+
+# ============================================
+# NOTIFICATION SERIALIZERS
+# ============================================
+
+class NotificationSerializer(serializers.ModelSerializer):
+    subject_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'title', 'body', 'subject', 'subject_name',
+            'action_url', 'is_read', 'is_pinned', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def get_subject_name(self, obj):
+        return obj.subject.name if obj.subject else None
+
+
+class NotificationUpdateSerializer(serializers.Serializer):
+    """PATCH: mark read and/or pin (save for later)."""
+    is_read = serializers.BooleanField(required=False)
+    is_pinned = serializers.BooleanField(required=False)
+
+
+# ============================================
+# SUBJECT ROUTINE SERIALIZERS
+# ============================================
+
+class SubjectRoutineSerializer(serializers.ModelSerializer):
+    subject_name = serializers.CharField(source='subject.name', read_only=True)
+    day_display = serializers.CharField(source='get_day_of_week_display', read_only=True)
+    user_has_reminder = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SubjectRoutine
+        fields = [
+            'id', 'subject', 'subject_name', 'day_of_week', 'day_display',
+            'start_time', 'end_time', 'title', 'description', 'order',
+            'user_has_reminder',
+        ]
+
+    def get_user_has_reminder(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.reminder_users.filter(user=request.user).exists()
+
+
+class UserRoutineReminderSerializer(serializers.ModelSerializer):
+    routine = SubjectRoutineSerializer(read_only=True)
+    routine_id = serializers.PrimaryKeyRelatedField(
+        queryset=SubjectRoutine.objects.all(),
+        source='routine',
+        write_only=True,
+    )
+
+    class Meta:
+        model = UserRoutineReminder
+        fields = ['id', 'routine', 'routine_id', 'notify_minutes_before', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+# ============================================
+# FEED POST (image, title, description; user can like)
+# ============================================
+
+class FeedPostSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+    like_count = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FeedPost
+        fields = [
+            'id', 'image', 'image_url', 'title', 'description',
+            'like_count', 'is_liked', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
+
+    def get_like_count(self, obj):
+        return getattr(obj, '_like_count', obj.likes.count())
+
+    def get_is_liked(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return getattr(obj, '_is_liked', obj.likes.filter(user=request.user).exists())

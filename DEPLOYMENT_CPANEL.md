@@ -8,10 +8,8 @@ This guide helps you publish the Bachelor Question Bank API on a cPanel host.
 
 If you **cloned this repo** on cPanel (no manual upload):
 
-1. **Clone** the repo into your app folder (e.g. `~/pdf_server/` or `~/public_html/your-api/`).
-2. **Database and media are not in the repo** (they are in `.gitignore`). Do one of the following:
-   - **Option A – You have a backup:** Upload your `db.sqlite3` and `media/` folder into the project root (same level as `manage.py`). Then set permissions (e.g. 664 for `db.sqlite3`, 775 for `media/`).
-   - **Option B – Fresh start:** Do nothing. Run `python manage.py migrate` to create a new empty database, then `python manage.py createsuperuser` to create an admin user.
+1. **Clone** the repo into your app folder (e.g. `~/pdf_server/` or `~/public_html/your-api/`). **`db.sqlite3`** is in the repo. **`media/`** is not – upload your `media/` folder to the project root if you have existing PDFs/images.
+2. Set **permissions**: chmod 664 for `db.sqlite3`, 775 for `media/` and its subfolders (cPanel File Manager → Change Permissions).
 3. **Set environment variables** in cPanel (see section 1.1): `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=0`, `DJANGO_ALLOWED_HOSTS=yourdomain.com`.
 4. **Install and run:**
    ```bash
@@ -42,10 +40,10 @@ Your project reads these from the server environment. Set them in cPanel **Setup
 
 OTP for forgot password is currently printed to terminal only. When you add a 3rd party SMS/OTP API, plug it into `pdf_app/utils.py` in `send_whatsapp_otp()` and keep any API keys in environment variables.
 
-### 1.3 Do upload when you want to keep your data
+### 1.3 Database and media
 
-- **`db.sqlite3`** – Upload this so your **existing users, PDFs, bookmarks, and all app data** are on the server. Put it in the **project root** (same folder as `manage.py`). After upload, the app user must be able to **read and write** this file (chmod 644 or 664).
-- **`media/`** – Upload the **entire `media/` folder** (with `pdfs/`, `book_images/`, etc.) so all **uploaded PDFs and images** are on the server. Keep the same structure: project root contains a `media/` folder. The app user must be able to **read and write** inside `media/` (chmod 755 for the folder, or 775 if the web server runs as same user).
+- **`db.sqlite3`** is in the repo (pushed to GitHub); it comes with the clone. Set permissions so the app can write to it (e.g. chmod 664).
+- **`media/`** is not in the repo. Upload your `media/` folder to the project root if you have existing uploads; set 775 for the folder and subfolders.
 
 ### 1.4 Don’t upload (exclude when uploading)
 
@@ -65,10 +63,7 @@ Upload the whole project (e.g. via **File Manager** or **Git**) into a folder un
   or  
 - `~/public_html/pdf_api/` (if you want the API under a subdomain/subpath)
 
-**Include these so your latest data is on the server:**
-
-- **`db.sqlite3`** – in the project root (same level as `manage.py`).
-- **`media/`** – entire folder in the project root (same level as `manage.py`), with all subfolders (`pdfs/`, `book_images/`, etc.).
+**`db.sqlite3`** is in the repo and comes with the clone. **`media/`** is not – upload it to the project root if you have existing PDFs/images.
 
 Typical structure on server:
 

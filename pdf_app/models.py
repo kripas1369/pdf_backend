@@ -777,3 +777,152 @@ class UserActivity(models.Model):
     
     def __str__(self):
         return f"{self.user.phone} - {self.date}"
+
+
+# ========================================
+# NOTIFICATIONS (all users; pin / save for later)
+# ========================================
+
+class Notification(models.Model):
+    """
+    In-app notification for a user. Admin can send to one user or "all users"
+    (creates one Notification per user). Student can mark read and pin (save for later).
+    """
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField(blank=True)
+    # Optional: link notification to a subject (e.g. "New PDF in Physics")
+    subject = models.ForeignKey(
+        Subject,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notifications',
+    )
+    action_url = models.CharField(max_length=500, blank=True, help_text='Optional deep link or URL')
+    is_read = models.BooleanField(default=False)
+    is_pinned = models.BooleanField(
+        default=False,
+        help_text='User pinned / saved for later',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['user', 'is_pinned']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.phone} - {self.title[:50]}"
+
+
+# ========================================
+# SUBJECT ROUTINE (per-subject schedule for students)
+# ========================================
+
+class SubjectRoutine(models.Model):
+    """
+    Class routine for a subject (e.g. Physics - Monday 10:00–11:00).
+    Students can view routine for each subject. Admin can enable notification
+    reminder per routine so user can "start" / subscribe to get notified.
+    """
+    DAY_CHOICES = [
+        (0, 'Sunday'),
+        (1, 'Monday'),
+        (2, 'Tuesday'),
+        (3, 'Wednesday'),
+        (4, 'Thursday'),
+        (5, 'Friday'),
+        (6, 'Saturday'),
+    ]
+    subject = models.ForeignKey(
+        Subject,
+        on_delete=models.CASCADE,
+        related_name='routines',
+    )
+    day_of_week = models.PositiveSmallIntegerField(choices=DAY_CHOICES)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    title = models.CharField(max_length=200, help_text='e.g. "Unit 1 – Mechanics"')
+    description = models.TextField(blank=True)
+    order = models.PositiveSmallIntegerField(default=0, help_text='Order within same day')
+
+    class Meta:
+        ordering = ['subject', 'day_of_week', 'order', 'start_time']
+        unique_together = ['subject', 'day_of_week', 'start_time']
+        indexes = [
+            models.Index(fields=['subject', 'day_of_week']),
+        ]
+
+    def __str__(self):
+        return f"{self.subject.name} – {self.get_day_of_week_display()} {self.start_time}-{self.end_time}"
+
+
+class UserRoutineReminder(models.Model):
+    """
+    User pins/subscribes to a routine slot to get reminder (e.g. "Notify me before Physics class").
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='routine_reminders')
+    routine = models.ForeignKey(SubjectRoutine, on_delete=models.CASCADE, related_name='reminder_users')
+    notify_minutes_before = models.PositiveSmallIntegerField(
+        default=15,
+        help_text='Send notification this many minutes before start_time',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'routine']
+        indexes = [
+            models.Index(fields=['user']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.phone} – {self.routine}"
+
+
+# ========================================
+# IN-APP FEED (image, title, description; user can like)
+# ========================================
+
+class FeedPost(models.Model):
+    """
+    In-app feed item: image, title, description. Users can like it.
+    Admin creates/edits in Django admin.
+    """
+    image = models.ImageField(upload_to='feed_posts/', blank=True, null=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, help_text='Inactive posts are hidden from the app')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['is_active', '-created_at'])]
+
+    def __str__(self):
+        return self.title[:50] if self.title else 'Untitled'
+
+
+class FeedPostLike(models.Model):
+    """User liked a feed post (one like per user per post)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feed_likes')
+    post = models.ForeignKey(FeedPost, on_delete=models.CASCADE, related_name='likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'post']
+        indexes = [
+            models.Index(fields=['post']),
+            models.Index(fields=['user']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.phone} liked #{self.post_id}"

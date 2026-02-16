@@ -119,6 +119,32 @@ urlpatterns = [
     path('feedback/', views.FeedbackCreateView.as_view(), name='feedback-create'),
     path('feedback/list/', views.FeedbackListView.as_view(), name='feedback-list'),
     path('user-query/', views.UserQueryCreateView.as_view(), name='user-query-create'),
+
+    # ========================================
+    # NOTIFICATIONS (all user; pin / save for later)
+    # ========================================
+    path('notifications/', views.NotificationListView.as_view(), name='notification-list'),
+    path('notifications/unread-count/', views.notification_unread_count, name='notification-unread-count'),
+    path('notifications/<int:pk>/', views.notification_update, name='notification-update'),
+    path('notifications/<int:pk>/mark-read/', views.notification_mark_read, name='notification-mark-read'),
+    path('notifications/<int:pk>/pin/', views.notification_pin, name='notification-pin'),
+    path('notifications/<int:pk>/unpin/', views.notification_unpin, name='notification-unpin'),
+
+    # ========================================
+    # SUBJECT ROUTINES (per subject; start reminder)
+    # ========================================
+    path('subjects/<int:subject_id>/routines/', views.SubjectRoutineListView.as_view(), name='subject-routine-list'),
+    path('routines/<int:routine_id>/start-reminder/', views.routine_start_reminder, name='routine-start-reminder'),
+    path('routines/<int:routine_id>/stop-reminder/', views.routine_stop_reminder, name='routine-stop-reminder'),
+    path('routines/my-reminders/', views.MyRoutineRemindersView.as_view(), name='my-routine-reminders'),
+
+    # ========================================
+    # FEED (image, title, description; user can like)
+    # ========================================
+    path('feed/', views.FeedPostListView.as_view(), name='feed-list'),
+    path('feed/<int:pk>/', views.FeedPostDetailView.as_view(), name='feed-detail'),
+    path('feed/<int:pk>/like/', views.feed_post_like, name='feed-like'),
+    path('feed/<int:pk>/unlike/', views.feed_post_unlike, name='feed-unlike'),
 ]
 
 # ========================================

@@ -21,14 +21,13 @@ python manage.py runserver
 
 ## Deploy on cPanel
 
-1. Clone this repo on your server (or upload the project).
-2. **Database and media:** Not in the repo. Upload your `db.sqlite3` and `media/` into the project root if you have existing data; otherwise run `migrate` and `createsuperuser`.
-3. Set env vars: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=0`, `DJANGO_ALLOWED_HOSTS=yourdomain.com`.
-4. See **[DEPLOYMENT_CPANEL.md](DEPLOYMENT_CPANEL.md)** for full steps (Python app, passenger_wsgi, static/media).
+1. Clone this repo on your server (or upload the project). **`db.sqlite3`** is in the repo; **`media/`** is not – upload your `media/` folder to the project root if you have existing uploads.
+2. Set env vars: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=0`, `DJANGO_ALLOWED_HOSTS=yourdomain.com`.
+3. See **[DEPLOYMENT_CPANEL.md](DEPLOYMENT_CPANEL.md)** for full steps (Python app, passenger_wsgi, static/media).
 
 ---
 
 ## Repo contents
 
-- **In the repo:** App code, `requirements.txt`, `passenger_wsgi.py`, templates, docs.
-- **Not in the repo** (in `.gitignore`): `db.sqlite3`, `media/`, `staticfiles/`, `venv/`, `.env`. Add these on the server (upload or generate after clone).
+- **In the repo:** App code, `requirements.txt`, `passenger_wsgi.py`, `db.sqlite3`, templates, docs.
+- **Not in the repo** (in `.gitignore`): `media/`, `staticfiles/`, `venv/`, `.env`, logs.
