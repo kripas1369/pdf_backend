@@ -1,0 +1,18 @@
+{% extends "admin/change_list.html" %}
+{% load i18n pdf_app_admin_tags %}
+
+{% block content %}
+{% pending_student_pdfs_count as pending_count %}
+{% if pending_count > 0 %}
+<div class="module student-uploads-banner" style="margin-bottom: 20px; padding: 16px 20px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border: 2px solid #1976d2; border-radius: 8px;">
+    <h3 style="margin: 0 0 8px 0; font-size: 1.1rem; color: #0d47a1;">📄 Student PDF uploads – Review & approve / reject</h3>
+    <p style="margin: 0 0 8px 0; font-size: 0.95rem;">
+        <strong>{{ pending_count }}</strong> student PDF(s) are pending. Use the filter <strong>Student upload → Student uploaded</strong> and <strong>Is approved → No</strong> to see them, then select rows and use the action <strong>Approve selected PDFs</strong> or <strong>Reject selected PDFs</strong>. Approving a PDF also approves its subject and topic; rejecting a PDF rejects its subject and topic.
+    </p>
+    <p style="margin: 0;">
+        <a href="?student_upload=yes&amp;is_approved=0" style="padding: 8px 14px; background: #1976d2; color: #fff; text-decoration: none; border-radius: 4px; font-weight: bold;">Show pending student PDFs only</a>
+    </p>
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock %}

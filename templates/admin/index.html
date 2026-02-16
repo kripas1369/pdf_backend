@@ -1,0 +1,54 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static pdf_app_admin_tags %}
+
+{% block extrastyle %}{{ block.super }}{% endblock %}
+
+{% block coltype %}colMS{% endblock %}
+
+{% block bodyclass %}{{ block.super }} dashboard{% endblock %}
+
+{% block nav-breadcrumbs %}{% endblock %}
+
+{% block nav-sidebar %}{% endblock %}
+
+{% block content %}
+{% pending_student_pdfs_count as pending_count %}
+<div class="module pending-student-uploads" style="margin-bottom: 24px; padding: 20px; background: {% if pending_count > 0 %}linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%); border: 2px solid #ffa000;{% else %}linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border: 2px solid #4caf50;{% endif %} border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08);">
+    <h2 style="margin: 0 0 12px 0; font-size: 1.25rem; color: {% if pending_count > 0 %}#e65100{% else %}#2e7d32{% endif %};">📄 Student PDF uploads</h2>
+    <p style="margin: 0 0 12px 0; font-size: 1rem;">
+        {% if pending_count > 0 %}
+        <strong>{{ pending_count }}</strong> PDF(s) uploaded by students are waiting for review. Approve or reject them so they appear (or stay hidden) in the app.
+        {% else %}
+        No student PDFs pending approval. When students upload PDFs, they will appear here for you to approve or reject.
+        {% endif %}
+    </p>
+    <p style="margin: 0;">
+        <a href="{% url 'admin:pdf_app_pdffile_changelist' %}?student_upload=yes{% if pending_count > 0 %}&amp;is_approved=0{% endif %}" class="button" style="padding: 10px 16px; background: {% if pending_count > 0 %}#ff9800{% else %}#4caf50{% endif %}; color: #fff; text-decoration: none; border-radius: 4px; font-weight: bold;">{% if pending_count > 0 %}Review & approve / reject{% else %}View student uploads{% endif %}</a>
+    </p>
+</div>
+{% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
+{% endblock %}
+
+{% block sidebar %}
+{% translate 'Recent actions' %}
+{% translate 'My actions' %}
+{% load log %}
+{% get_admin_log 10 as admin_log for_user user %}
+{% if not admin_log %}
+{% translate 'None available' %}
+{% else %}
+{% for entry in admin_log %}
+{% if entry.is_addition %}{% translate 'Added:' %}{% elif entry.is_change %}{% translate 'Changed:' %}{% elif entry.is_deletion %}{% translate 'Deleted:' %}{% endif %}
+{% if entry.is_deletion or not entry.get_admin_url %}
+{{ entry.object_repr }}
+{% else %}
+{{ entry.object_repr }}
+{% endif %}
+{% if entry.content_type %}
+{% filter capfirst %}{{ entry.content_type.name }}{% endfilter %}
+{% else %}
+{% translate 'Unknown content' %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endblock %}
