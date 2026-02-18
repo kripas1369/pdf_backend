@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Book, BookBooking
+from .utils import compress_image
 
 
 def _seller_name(obj):
@@ -128,12 +129,22 @@ class BookCreateSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def _compress_front_image_if_present(self, validated_data):
+        """Compress front_image (e.g. from iPhone) to reduce size before save."""
+        if 'front_image' in validated_data and validated_data['front_image']:
+            validated_data['front_image'] = compress_image(validated_data['front_image'])
+
     def create(self, validated_data):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError('Authentication required.')
+        self._compress_front_image_if_present(validated_data)
         validated_data['seller'] = request.user
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        self._compress_front_image_if_present(validated_data)
+        return super().update(instance, validated_data)
 
 
 class BookBookingSerializer(serializers.ModelSerializer):

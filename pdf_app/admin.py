@@ -1171,16 +1171,20 @@ class UserRoutineReminderAdmin(admin.ModelAdmin):
 
 
 # ========================================
-# FEED POST (image, title, description; user can like)
+# TU NOTICE FEED (user posts, admin approval, like, bookmark, comment)
 # ========================================
 
 @admin.register(FeedPost)
 class FeedPostAdmin(IntegrityErrorMixin, admin.ModelAdmin):
-    list_display = ['id', 'image_preview', 'title_short', 'like_count_display', 'is_active', 'created_at']
-    list_filter = ['is_active', 'created_at']
+    list_display = [
+        'id', 'image_preview', 'title_short', 'created_by_short', 'status',
+        'like_count_display', 'comment_count_display', 'is_active', 'created_at',
+    ]
+    list_filter = ['status', 'is_active', 'created_at']
     search_fields = ['title', 'description']
-    list_editable = ['is_active']
+    list_editable = ['status', 'is_active']
     readonly_fields = ['image_preview', 'created_at', 'updated_at']
+    raw_id_fields = ['created_by']
 
     def image_preview(self, obj):
         if obj and obj.pk and obj.image:
@@ -1195,9 +1199,17 @@ class FeedPostAdmin(IntegrityErrorMixin, admin.ModelAdmin):
         return (obj.title[:40] + '...') if obj.title and len(obj.title) > 40 else (obj.title or '–')
     title_short.short_description = 'Title'
 
+    def created_by_short(self, obj):
+        return obj.created_by.phone if obj.created_by else '–'
+    created_by_short.short_description = 'Created by'
+
     def like_count_display(self, obj):
         return obj.likes.count() if obj.pk else 0
     like_count_display.short_description = 'Likes'
+
+    def comment_count_display(self, obj):
+        return obj.comments.count() if obj.pk else 0
+    comment_count_display.short_description = 'Comments'
 
 
 @admin.register(FeedPostLike)
@@ -1214,6 +1226,42 @@ class FeedPostLikeAdmin(admin.ModelAdmin):
     def post_title(self, obj):
         return (obj.post.title[:50] + '...') if obj.post and len(obj.post.title) > 50 else (obj.post.title if obj.post else '–')
     post_title.short_description = 'Post'
+
+
+@admin.register(FeedPostBookmark)
+class FeedPostBookmarkAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user_phone', 'post_title', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['user__phone', 'post__title']
+    raw_id_fields = ['user', 'post']
+
+    def user_phone(self, obj):
+        return obj.user.phone if obj.user else '–'
+    user_phone.short_description = 'User'
+
+    def post_title(self, obj):
+        return (obj.post.title[:50] + '...') if obj.post and len(obj.post.title) > 50 else (obj.post.title if obj.post else '–')
+    post_title.short_description = 'Post'
+
+
+@admin.register(FeedPostComment)
+class FeedPostCommentAdmin(admin.ModelAdmin):
+    list_display = ['id', 'post_title', 'user_phone', 'text_short', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['user__phone', 'post__title', 'text']
+    raw_id_fields = ['user', 'post']
+
+    def post_title(self, obj):
+        return (obj.post.title[:50] + '...') if obj.post and len(obj.post.title) > 50 else (obj.post.title if obj.post else '–')
+    post_title.short_description = 'Post'
+
+    def user_phone(self, obj):
+        return obj.user.phone if obj.user else '–'
+    user_phone.short_description = 'User'
+
+    def text_short(self, obj):
+        return (obj.text[:40] + '...') if obj.text and len(obj.text) > 40 else (obj.text or '–')
+    text_short.short_description = 'Text'
 
 
 # ========================================

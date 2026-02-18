@@ -888,24 +888,40 @@ class UserRoutineReminder(models.Model):
 
 
 # ========================================
-# IN-APP FEED (image, title, description; user can like)
+# TU NOTICE FEED (Facebook-style: user posts, admin approval, like, bookmark, comment)
 # ========================================
 
 class FeedPost(models.Model):
     """
-    In-app feed item: image, title, description. Users can like it.
-    Admin creates/edits in Django admin.
+    TU Notice Feed post: image, title, description.
+    Users can create posts (status=PENDING); admin approves. Users can like, bookmark, comment.
     """
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    ]
     image = models.ImageField(upload_to='feed_posts/', blank=True, null=True)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tu_notice_posts'
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='APPROVED',
+        help_text='User-created posts start as Pending; admin approves.'
+    )
     is_active = models.BooleanField(default=True, help_text='Inactive posts are hidden from the app')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['is_active', '-created_at'])]
+        indexes = [
+            models.Index(fields=['is_active', 'status', '-created_at']),
+            models.Index(fields=['created_by']),
+        ]
 
     def __str__(self):
         return self.title[:50] if self.title else 'Untitled'
@@ -926,3 +942,38 @@ class FeedPostLike(models.Model):
 
     def __str__(self):
         return f"{self.user.phone} liked #{self.post_id}"
+
+
+class FeedPostBookmark(models.Model):
+    """User bookmarked a feed post (one bookmark per user per post)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feed_bookmarks')
+    post = models.ForeignKey(FeedPost, on_delete=models.CASCADE, related_name='bookmarks')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'post']
+        indexes = [
+            models.Index(fields=['post']),
+            models.Index(fields=['user']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.phone} bookmarked #{self.post_id}"
+
+
+class FeedPostComment(models.Model):
+    """Comment on a feed post."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feed_comments')
+    post = models.ForeignKey(FeedPost, on_delete=models.CASCADE, related_name='comments')
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['post']),
+            models.Index(fields=['user']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.phone} on #{self.post_id}: {self.text[:30]}..."

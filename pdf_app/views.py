@@ -1194,50 +1194,120 @@ class MyRoutineRemindersView(generics.ListAPIView):
 
 
 # ============================================
-# FEED POST (image, title, description; user can like)
+# TU NOTICE FEED (user posts, admin approval, like, bookmark, comment)
 # ============================================
+
+def _feed_post_queryset(request, approved_only=True):
+    """Base queryset for feed: approved + active. Annotate like_count, is_liked, comment_count, is_bookmarked."""
+    qs = FeedPost.objects.filter(is_active=True)
+    if approved_only:
+        qs = qs.filter(status='APPROVED')
+    qs = qs.annotate(
+        _like_count=Count('likes'),
+        _comment_count=Count('comments'),
+    )
+    user = getattr(request, 'user', None)
+    if user and user.is_authenticated:
+        qs = qs.annotate(
+            _is_liked=Exists(FeedPostLike.objects.filter(post=OuterRef('pk'), user=user)),
+            _is_bookmarked=Exists(FeedPostBookmark.objects.filter(post=OuterRef('pk'), user=user)),
+        )
+    return qs.order_by('-created_at')
+
 
 class FeedPostListView(generics.ListAPIView):
     """
     GET /api/feed/
-    List active feed posts (image, title, description). Optional auth: if logged in, is_liked is set.
+    List approved TU Notice Feed posts. Optional auth: is_liked, is_bookmarked set when logged in.
     """
     serializer_class = FeedPostSerializer
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        qs = FeedPost.objects.filter(is_active=True)
-        user = getattr(self.request, 'user', None)
-        if user and user.is_authenticated:
-            # Annotate so we know if current user liked each post
-            qs = qs.annotate(
-                _like_count=Count('likes'),
-                _is_liked=Exists(FeedPostLike.objects.filter(post=OuterRef('pk'), user=user)),
-            )
-        else:
-            qs = qs.annotate(_like_count=Count('likes'))
-        return qs.order_by('-created_at')
+        return _feed_post_queryset(self.request, approved_only=True)
 
 
 class FeedPostDetailView(generics.RetrieveAPIView):
     """
     GET /api/feed/<id>/
-    Single feed post with like_count and is_liked (if authenticated).
+    Single approved feed post with like_count, is_liked, comment_count, is_bookmarked.
     """
     serializer_class = FeedPostSerializer
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        qs = FeedPost.objects.filter(is_active=True)
-        user = getattr(self.request, 'user', None)
-        if user and user.is_authenticated:
-            qs = qs.annotate(
-                _like_count=Count('likes'),
-                _is_liked=Exists(FeedPostLike.objects.filter(post=OuterRef('pk'), user=user)),
-            )
-        else:
-            qs = qs.annotate(_like_count=Count('likes'))
-        return qs
+        return _feed_post_queryset(self.request, approved_only=True)
+
+
+class FeedPostCreateView(generics.CreateAPIView):
+    """
+    POST /api/feed/create/
+    Create a TU Notice post (multipart: image, title, description). Status = PENDING until admin approves.
+    """
+    serializer_class = FeedPostCreateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, status='PENDING')
+
+
+class MyFeedPostsListView(generics.ListAPIView):
+    """
+    GET /api/feed/my-posts/
+    List current user's TU Notice posts (all statuses: PENDING, APPROVED, REJECTED).
+    """
+    serializer_class = FeedPostSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return _feed_post_queryset(self.request, approved_only=False).filter(created_by=self.request.user)
+
+
+class MyFeedBookmarksListView(generics.ListAPIView):
+    """
+    GET /api/feed/bookmarks/
+    List feed posts that the current user has bookmarked (approved posts only, newest first).
+    """
+    serializer_class = FeedPostSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return _feed_post_queryset(self.request, approved_only=True).filter(
+            bookmarks__user=self.request.user
+        ).distinct()
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def feed_post_approve(request, pk):
+    """
+    POST /api/feed/<id>/approve/
+    Admin only. Set post status to APPROVED so it appears in the feed.
+    """
+    post = get_object_or_404(FeedPost, pk=pk)
+    post.status = 'APPROVED'
+    post.is_active = True
+    post.save(update_fields=['status', 'is_active', 'updated_at'])
+    return Response(
+        FeedPostSerializer(post, context={'request': request}).data,
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def feed_post_reject(request, pk):
+    """
+    POST /api/feed/<id>/reject/
+    Admin only. Set post status to REJECTED (hidden from feed).
+    """
+    post = get_object_or_404(FeedPost, pk=pk)
+    post.status = 'REJECTED'
+    post.save(update_fields=['status', 'updated_at'])
+    return Response(
+        FeedPostSerializer(post, context={'request': request}).data,
+        status=status.HTTP_200_OK,
+    )
 
 
 @api_view(['POST'])
@@ -1245,9 +1315,9 @@ class FeedPostDetailView(generics.RetrieveAPIView):
 def feed_post_like(request, pk):
     """
     POST /api/feed/<id>/like/
-    Like the post (idempotent: already liked is 200).
+    Like the post (idempotent: already liked is 200). Only approved posts.
     """
-    post = get_object_or_404(FeedPost, pk=pk, is_active=True)
+    post = get_object_or_404(FeedPost, pk=pk, is_active=True, status='APPROVED')
     _, created = FeedPostLike.objects.get_or_create(user=request.user, post=post)
     return Response(
         FeedPostSerializer(post, context={'request': request}).data,
@@ -1262,9 +1332,64 @@ def feed_post_unlike(request, pk):
     POST /api/feed/<id>/unlike/
     Remove like. Returns updated post.
     """
-    post = get_object_or_404(FeedPost, pk=pk, is_active=True)
-    deleted, _ = FeedPostLike.objects.filter(user=request.user, post=post).delete()
+    post = get_object_or_404(FeedPost, pk=pk, is_active=True, status='APPROVED')
+    FeedPostLike.objects.filter(user=request.user, post=post).delete()
     return Response(
         FeedPostSerializer(post, context={'request': request}).data,
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def feed_post_bookmark(request, pk):
+    """
+    POST /api/feed/<id>/bookmark/
+    Bookmark the post (idempotent). Only approved posts.
+    """
+    post = get_object_or_404(FeedPost, pk=pk, is_active=True, status='APPROVED')
+    _, created = FeedPostBookmark.objects.get_or_create(user=request.user, post=post)
+    return Response(
+        FeedPostSerializer(post, context={'request': request}).data,
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def feed_post_unbookmark(request, pk):
+    """
+    POST /api/feed/<id>/unbookmark/
+    Remove bookmark.
+    """
+    post = get_object_or_404(FeedPost, pk=pk, is_active=True, status='APPROVED')
+    FeedPostBookmark.objects.filter(user=request.user, post=post).delete()
+    return Response(
+        FeedPostSerializer(post, context={'request': request}).data,
+        status=status.HTTP_200_OK,
+    )
+
+
+class FeedPostCommentListCreateView(generics.ListCreateAPIView):
+    """
+    GET /api/feed/<id>/comments/ – List comments for an approved feed post.
+    POST /api/feed/<id>/comments/ – Add a comment (auth required). Body: { "text": "..." }
+    """
+    serializer_class = FeedPostCommentSerializer
+    permission_classes = [AllowAny]  # GET allowed for all; POST requires auth (serializer/validation can check)
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAuthenticated()]
+        return [AllowAny()]
+
+    def get_queryset(self):
+        return FeedPostComment.objects.filter(
+            post_id=self.kwargs['pk'],
+            post__status='APPROVED',
+            post__is_active=True,
+        ).select_related('user').order_by('created_at')
+
+    def perform_create(self, serializer):
+        post = get_object_or_404(FeedPost, pk=self.kwargs['pk'], is_active=True, status='APPROVED')
+        serializer.save(user=self.request.user, post=post)

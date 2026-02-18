@@ -783,21 +783,26 @@ class UserRoutineReminderSerializer(serializers.ModelSerializer):
 
 
 # ============================================
-# FEED POST (image, title, description; user can like)
+# TU NOTICE FEED (user posts, admin approval, like, bookmark, comment)
 # ============================================
 
 class FeedPostSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
     like_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
+    is_bookmarked = serializers.SerializerMethodField()
+    created_by_phone = serializers.SerializerMethodField()
 
     class Meta:
         model = FeedPost
         fields = [
             'id', 'image', 'image_url', 'title', 'description',
-            'like_count', 'is_liked', 'created_at', 'updated_at',
+            'created_by', 'created_by_phone', 'status',
+            'like_count', 'is_liked', 'comment_count', 'is_bookmarked',
+            'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'status']
 
     def get_image_url(self, obj):
         if obj.image:
@@ -815,3 +820,43 @@ class FeedPostSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return False
         return getattr(obj, '_is_liked', obj.likes.filter(user=request.user).exists())
+
+    def get_comment_count(self, obj):
+        return getattr(obj, '_comment_count', obj.comments.count())
+
+    def get_is_bookmarked(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return getattr(obj, '_is_bookmarked', obj.bookmarks.filter(user=request.user).exists())
+
+    def get_created_by_phone(self, obj):
+        return obj.created_by.phone if obj.created_by else None
+
+    def to_representation(self, data):
+        rep = super().to_representation(data)
+        request = self.context.get('request')
+        # Only show status to admin or post author
+        if request and request.user.is_authenticated:
+            if not (request.user.is_staff or (data.created_by_id == request.user.id)):
+                rep.pop('status', None)
+        else:
+            rep.pop('status', None)
+        return rep
+
+
+class FeedPostCreateSerializer(serializers.ModelSerializer):
+    """Create a TU Notice post (image + text). Status will be PENDING until admin approves."""
+    class Meta:
+        model = FeedPost
+        fields = ['image', 'title', 'description']
+
+
+class FeedPostCommentSerializer(serializers.ModelSerializer):
+    """Comment on a feed post."""
+    user_phone = serializers.CharField(source='user.phone', read_only=True)
+
+    class Meta:
+        model = FeedPostComment
+        fields = ['id', 'user', 'user_phone', 'text', 'created_at']
+        read_only_fields = ['id', 'user', 'created_at']

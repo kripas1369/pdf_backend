@@ -139,12 +139,20 @@ urlpatterns = [
     path('routines/my-reminders/', views.MyRoutineRemindersView.as_view(), name='my-routine-reminders'),
 
     # ========================================
-    # FEED (image, title, description; user can like)
+    # TU NOTICE FEED (user create, admin approve, like, bookmark, comment)
     # ========================================
     path('feed/', views.FeedPostListView.as_view(), name='feed-list'),
+    path('feed/create/', views.FeedPostCreateView.as_view(), name='feed-create'),
+    path('feed/my-posts/', views.MyFeedPostsListView.as_view(), name='feed-my-posts'),
+    path('feed/bookmarks/', views.MyFeedBookmarksListView.as_view(), name='feed-bookmarks-list'),
     path('feed/<int:pk>/', views.FeedPostDetailView.as_view(), name='feed-detail'),
+    path('feed/<int:pk>/approve/', views.feed_post_approve, name='feed-approve'),
+    path('feed/<int:pk>/reject/', views.feed_post_reject, name='feed-reject'),
     path('feed/<int:pk>/like/', views.feed_post_like, name='feed-like'),
     path('feed/<int:pk>/unlike/', views.feed_post_unlike, name='feed-unlike'),
+    path('feed/<int:pk>/bookmark/', views.feed_post_bookmark, name='feed-bookmark'),
+    path('feed/<int:pk>/unbookmark/', views.feed_post_unbookmark, name='feed-unbookmark'),
+    path('feed/<int:pk>/comments/', views.FeedPostCommentListCreateView.as_view(), name='feed-comments'),
 ]
 
 # ========================================
