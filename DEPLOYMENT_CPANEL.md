@@ -24,6 +24,74 @@ After that, follow the rest of this guide (Setup Python App, passenger_wsgi, etc
 
 ---
 
+## 0.1 After cloning – venv and run (step-by-step)
+
+You cloned the project; next steps depend on how your cPanel runs Python.
+
+### Option A: cPanel “Setup Python App” (recommended)
+
+cPanel will create the virtual environment for you when you create the app.
+
+1. **Create the Python app in cPanel**
+   - Go to **Setup Python App** → **Create Application**.
+   - **Python version:** e.g. 3.12.11 (whatever your host offers).
+   - **Application root:** the folder where you cloned (e.g. `pdf_backend` → full path like `/home/youruser/pdf_backend`).
+   - **Application URL:** your domain or subdomain.
+   - **Application startup file:** `passenger_wsgi.py`
+   - **WSGI callable:** `application`
+   - Save. cPanel creates a virtualenv (e.g. `/home/youruser/virtualenv/pdf_backend/3.12`).
+
+2. **Add environment variables** in the same app:
+   - `DJANGO_SECRET_KEY` = generate: `python3 -c "import secrets; print(secrets.token_urlsafe(50))"`
+   - `DJANGO_DEBUG` = `0`
+   - `DJANGO_ALLOWED_HOSTS` = `yourdomain.com,www.yourdomain.com`
+
+3. **Install dependencies and run Django** (SSH or cPanel “Run” / terminal):
+   ```bash
+   cd /home/youruser/pdf_backend
+   source /home/youruser/virtualenv/pdf_backend/3.12/bin/activate
+   pip install -r requirements.txt
+   python manage.py migrate
+   python manage.py collectstatic --noinput
+   ```
+   Use the **exact** virtualenv path cPanel shows for your app (e.g. 3.11 or 3.12 in the path).
+
+4. **Restart** the app in Setup Python App.
+
+### Option B: SSH only (create .venv yourself)
+
+If you are not using Setup Python App and only have SSH:
+
+1. **Go to project folder and create a venv**
+   ```bash
+   cd /home/youruser/pdf_backend
+   python3.12 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. **Install dependencies and run Django**
+   ```bash
+   pip install -r requirements.txt
+   export DJANGO_SECRET_KEY="your-generated-secret"
+   export DJANGO_DEBUG=0
+   export DJANGO_ALLOWED_HOSTS="yourdomain.com,www.yourdomain.com"
+   python manage.py migrate
+   python manage.py collectstatic --noinput
+   ```
+
+3. **Run the server** (for testing only; in production cPanel/Passenger will run the app):
+   ```bash
+   python manage.py runserver 0.0.0.0:8000
+   ```
+   For production you still need to use **Setup Python App** (Option A) so cPanel serves the app via Passenger.
+
+### Permissions (both options)
+
+- **db.sqlite3:** `chmod 664 db.sqlite3`
+- **media/** (if you create or upload it): `chmod -R 775 media`
+
+---
+
 ## 1. Before you upload
 
 ### 1.1 Environment variables (production)

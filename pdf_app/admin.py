@@ -8,6 +8,8 @@
 from decimal import Decimal
 from django import forms
 from django.contrib import admin
+from django.db import IntegrityError, transaction
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from django.utils import timezone
 from django.urls import path, reverse
@@ -15,6 +17,80 @@ from django.shortcuts import redirect
 from django.contrib import messages
 from pdf_app.models import *
 from pdf_app.utils import grant_subscription_access, create_auto_groups, update_college_stats, get_pdfs_for_package
+
+
+# ========================================
+# INTEGRITY ERROR MIXIN (friendly FK constraint messages)
+# ========================================
+
+class IntegrityErrorMixin:
+    """Catches IntegrityError (e.g. FOREIGN KEY constraint) and shows a clear, actionable message."""
+
+    def get_integrity_error_message(self, exc, context='save'):
+        return (
+            'Database constraint failed. '
+            'A related record (Subject, Topic, User, or PDF) may have been deleted. '
+            'Please ensure all selected references still exist. '
+            f'Details: {exc}'
+        )
+
+    def save_model(self, request, obj, form, change):
+        try:
+            super().save_model(request, obj, form, change)
+        except IntegrityError as e:
+            msg = self.get_integrity_error_message(e, 'save')
+            self.message_user(request, msg, messages.ERROR)
+            raise ValueError(msg) from e
+
+    def save_related(self, request, form, formsets, change):
+        """Catch IntegrityError from inline formsets and M2M saves."""
+        try:
+            super().save_related(request, form, formsets, change)
+        except IntegrityError as e:
+            msg = self.get_integrity_error_message(e, 'save')
+            self.message_user(request, msg, messages.ERROR)
+            raise ValueError(msg) from e
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        """Wrap save in transaction.atomic so failed saves roll back completely."""
+        if request.method == 'POST':
+            try:
+                with transaction.atomic():
+                    return super().changeform_view(request, object_id, form_url, extra_context)
+            except (ValueError, IntegrityError) as e:
+                # Already messaged in save_model/save_related; re-raise so admin shows error
+                if isinstance(e, IntegrityError):
+                    self.message_user(
+                        request,
+                        self.get_integrity_error_message(e, 'save'),
+                        messages.ERROR
+                    )
+                raise
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def delete_model(self, request, obj):
+        try:
+            super().delete_model(request, obj)
+        except IntegrityError as e:
+            msg = (
+                'Cannot delete: other records depend on this (e.g. PDFs, Subjects, Payments). '
+                'Delete dependent records first, or fix relations. '
+                f'Details: {e}'
+            )
+            self.message_user(request, msg, messages.ERROR)
+            raise ValueError(msg) from e
+
+    def delete_queryset(self, request, queryset):
+        try:
+            super().delete_queryset(request, queryset)
+        except IntegrityError as e:
+            msg = (
+                'Cannot delete: some records are referenced elsewhere. '
+                'Delete dependent records first. '
+                f'Details: {e}'
+            )
+            self.message_user(request, msg, messages.ERROR)
+            raise ValueError(msg) from e
 
 
 # ========================================
@@ -78,11 +154,15 @@ class PDFPackageAdminForm(forms.ModelForm):
         if pkg_type == 'SUBJECT':
             if not subject:
                 raise forms.ValidationError({'subject': 'Select a subject for Subject package.'})
+            if not Subject.objects.filter(pk=subject.pk).exists():
+                raise forms.ValidationError({'subject': 'Selected subject no longer exists. Choose another.'})
             data['year'] = None
             data['topic'] = None
         elif pkg_type == 'TOPIC':
             if not topic:
                 raise forms.ValidationError({'topic': 'Select a topic for Topic package.'})
+            if not Topic.objects.filter(pk=topic.pk).exists():
+                raise forms.ValidationError({'topic': 'Selected topic no longer exists. Choose another.'})
             data['subject'] = None
             data['year'] = None
         elif pkg_type == 'YEAR':
@@ -98,7 +178,7 @@ class PDFPackageAdminForm(forms.ModelForm):
 
 
 @admin.register(PDFPackage)
-class PDFPackageAdmin(admin.ModelAdmin):
+class PDFPackageAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     """Simple packages: Subject package (all PDFs in one subject) or Year package (all PDFs in one year). Content = All / Questions / Solutions."""
     form = PDFPackageAdminForm
     list_display = ['name', 'package_type', 'content_type_display', 'topic', 'subject', 'year', 'price', 'pdf_count_display', 'is_active', 'created_at']
@@ -180,7 +260,7 @@ class PdfAccessInline(admin.TabularInline):
 
 
 @admin.register(Payment)
-class PaymentAdmin(admin.ModelAdmin):
+class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     """Admin panel for payment verification + PDF access in one place"""
     
     inlines = [PdfAccessInline]
@@ -215,15 +295,11 @@ class PaymentAdmin(admin.ModelAdmin):
         'transaction_note'
     ]
     
-    readonly_fields = [
-        'payment_id',
-        'user',
-        'created_at',
-        'updated_at',
-        'screenshot_preview',
-        'verified_by',
-        'verified_at'
-    ]
+    def get_readonly_fields(self, request, obj=None):
+        readonly = ['payment_id', 'created_at', 'updated_at', 'screenshot_preview', 'verified_by', 'verified_at']
+        if obj:  # Editing existing payment – don't allow changing user
+            readonly = ['user'] + readonly
+        return readonly
     
     fields = [
         'payment_id',
@@ -626,8 +702,22 @@ class GroupMessageAdmin(admin.ModelAdmin):
 # ========================================
 
 # Inlines for User: show student uploads (PDFs, topics, subjects) for approval
+class UserUploadedPDFInlineForm(forms.ModelForm):
+    """Validate subject exists to prevent FOREIGN KEY constraint on save."""
+    class Meta:
+        model = PDFFile
+        fields = ['title', 'subject', 'year', 'is_approved']
+
+    def clean_subject(self):
+        subject = self.cleaned_data.get('subject')
+        if subject and not Subject.objects.filter(pk=subject.pk).exists():
+            raise forms.ValidationError('Selected subject no longer exists. Edit this PDF from the PDF list to fix.')
+        return subject
+
+
 class UserUploadedPDFInline(admin.TabularInline):
     model = PDFFile
+    form = UserUploadedPDFInlineForm
     fk_name = 'uploaded_by'
     extra = 0
     max_num = 0
@@ -637,6 +727,19 @@ class UserUploadedPDFInline(admin.TabularInline):
     readonly_fields = ['title', 'subject', 'year', 'created_at']
     verbose_name = 'Uploaded PDF'
     verbose_name_plural = 'Uploaded PDFs (approve here or via PDF list)'
+
+
+class UserUploadedSubjectInlineForm(forms.ModelForm):
+    """Validate topic exists to prevent FOREIGN KEY constraint on save."""
+    class Meta:
+        model = Subject
+        fields = ['name', 'topic', 'is_approved']
+
+    def clean_topic(self):
+        topic = self.cleaned_data.get('topic')
+        if topic and not Topic.objects.filter(pk=topic.pk).exists():
+            raise forms.ValidationError('Selected topic no longer exists. Edit this subject from the Subject list to fix.')
+        return topic
 
 
 class UserUploadedTopicInline(admin.TabularInline):
@@ -654,6 +757,7 @@ class UserUploadedTopicInline(admin.TabularInline):
 
 class UserUploadedSubjectInline(admin.TabularInline):
     model = Subject
+    form = UserUploadedSubjectInlineForm
     fk_name = 'uploaded_by'
     extra = 0
     max_num = 0
@@ -666,7 +770,7 @@ class UserUploadedSubjectInline(admin.TabularInline):
 
 
 # User Admin (custom) – shows all student uploads for approval
-class CustomUserAdmin(admin.ModelAdmin):
+class CustomUserAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = ['phone', 'name', 'referral_code', 'is_active', 'uploaded_pdfs_count', 'uploaded_pending_count', 'created_at']
     list_filter = ['is_active', 'is_staff']
     search_fields = ['phone', 'name', 'referral_code']
@@ -704,6 +808,20 @@ class PDFFileAdminForm(forms.ModelForm):
             self.initial['is_premium'] = True
             self.initial['price'] = Decimal('15.00')
 
+    def clean_subject(self):
+        subject = self.cleaned_data.get('subject')
+        if not subject:
+            raise forms.ValidationError('Subject is required. Create a Topic and Subject first (PDF app → Topics → Subjects).')
+        if not Subject.objects.filter(pk=subject.pk).exists():
+            raise forms.ValidationError('Selected subject no longer exists. Please choose another.')
+        return subject
+
+    def clean_uploaded_by(self):
+        uploaded_by = self.cleaned_data.get('uploaded_by')
+        if uploaded_by and not User.objects.filter(pk=uploaded_by.pk).exists():
+            raise forms.ValidationError('Selected user no longer exists. Leave empty or choose another.')
+        return uploaded_by
+
     def clean(self):
         data = super().clean()
         pdf_type = data.get('pdf_type', 'QUESTION')
@@ -735,17 +853,23 @@ def _cascade_pdf_approval_to_subject_topic(pdf, is_approved):
     """When admin approves/rejects a student PDF, also approve/reject its subject and topic."""
     if not pdf.subject_id:
         return
-    subject = pdf.subject
-    subject.is_approved = is_approved
-    subject.save(update_fields=['is_approved'])
-    if subject.topic_id:
-        topic = subject.topic
-        topic.is_approved = is_approved
-        topic.save(update_fields=['is_approved'])
+    try:
+        subject = pdf.subject
+    except Subject.DoesNotExist:
+        return  # Orphaned PDF (subject deleted)
+    try:
+        subject.is_approved = is_approved
+        subject.save(update_fields=['is_approved'])
+        if subject.topic_id:
+            topic = subject.topic
+            topic.is_approved = is_approved
+            topic.save(update_fields=['is_approved'])
+    except (IntegrityError, ObjectDoesNotExist):
+        pass  # Skip cascade if subject/topic has FK issues
 
 
 @admin.register(PDFFile)
-class PDFFileAdmin(admin.ModelAdmin):
+class PDFFileAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     """Admin for PDF files. Student uploads need approval here; approve/reject PDF → subject & topic follow."""
     form = PDFFileAdminForm
     change_list_template = 'admin/pdf_app/pdffile/change_list.html'
@@ -799,7 +923,23 @@ class PDFFileAdmin(admin.ModelAdmin):
         return f'{getattr(u, "name", "") or u.phone} ({u.phone})'
     uploaded_by_display.short_description = 'Uploaded by'
 
+    def get_integrity_error_message(self, exc, context='save'):
+        return (
+            'Foreign key constraint failed. The Subject or Uploaded-by user may have been deleted. '
+            'Select a valid Subject and ensure Uploaded-by (if set) exists. '
+            f'Details: {exc}'
+        )
+
     def save_model(self, request, obj, form, change):
+        # Ensure subject exists before cascade (fix orphaned PDFs)
+        if obj.subject_id and not Subject.objects.filter(pk=obj.subject_id).exists():
+            messages.error(
+                request,
+                f'PDF references deleted Subject (id={obj.subject_id}). Please select a valid Subject.'
+            )
+            raise ValueError('Subject no longer exists. Select a valid Subject.')
+        if obj.uploaded_by_id and not User.objects.filter(pk=obj.uploaded_by_id).exists():
+            obj.uploaded_by_id = None  # Clear orphaned user ref
         if change and obj.uploaded_by_id and obj.pk:
             try:
                 old = PDFFile.objects.get(pk=obj.pk)
@@ -844,7 +984,7 @@ class PDFFileAdmin(admin.ModelAdmin):
 # ========================================
 
 @admin.register(Topic)
-class TopicAdmin(admin.ModelAdmin):
+class TopicAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = ['id', 'name', 'uploaded_by_display', 'is_approved', 'created_at']
     list_filter = ['is_approved']
     search_fields = ['name', 'uploaded_by__phone', 'uploaded_by__name']
@@ -870,7 +1010,7 @@ class TopicAdmin(admin.ModelAdmin):
 
 
 @admin.register(Subject)
-class SubjectAdmin(admin.ModelAdmin):
+class SubjectAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = ['id', 'name', 'topic', 'uploaded_by_display', 'is_approved', 'created_at']
     list_filter = ['is_approved', 'topic']
     search_fields = ['name', 'topic__name', 'uploaded_by__phone', 'uploaded_by__name']
@@ -959,7 +1099,7 @@ class NotificationAdminForm(forms.ModelForm):
 
 
 @admin.register(Notification)
-class NotificationAdmin(admin.ModelAdmin):
+class NotificationAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     form = NotificationAdminForm
     list_display = ['id', 'title_short', 'user', 'subject', 'is_read', 'is_pinned', 'created_at']
     list_filter = ['is_read', 'is_pinned', 'subject', 'created_at']
@@ -1005,7 +1145,7 @@ class NotificationAdmin(admin.ModelAdmin):
 # ========================================
 
 @admin.register(SubjectRoutine)
-class SubjectRoutineAdmin(admin.ModelAdmin):
+class SubjectRoutineAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = ['id', 'subject', 'day_of_week', 'start_time', 'end_time', 'title', 'order']
     list_filter = ['subject', 'day_of_week']
     search_fields = ['title', 'description', 'subject__name']
@@ -1035,7 +1175,7 @@ class UserRoutineReminderAdmin(admin.ModelAdmin):
 # ========================================
 
 @admin.register(FeedPost)
-class FeedPostAdmin(admin.ModelAdmin):
+class FeedPostAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = ['id', 'image_preview', 'title_short', 'like_count_display', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['title', 'description']

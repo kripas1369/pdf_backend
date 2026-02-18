@@ -10,8 +10,8 @@ def app_ads_txt(request):
     Must be at root of developer website: https://your-domain.com/app-ads.txt
     Domain MUST match exactly what's in Google Play Console → App → Store presence → App details → Developer website.
     """
-    # IAB format: domain,publisher_id,relationship,certification_authority_id (no spaces per spec)
-    content = "google.com,pub-9127715515165521,DIRECT,f08c47fec0942fa0\n"
+    # IAB format: domain, publisher_id, relationship, certification_authority_id (exact AdMob snippet)
+    content = "google.com, pub-9127715515165521, DIRECT, f08c47fec0942fa0\n"
     return HttpResponse(
         content,
         content_type="text/plain; charset=utf-8",

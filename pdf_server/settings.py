@@ -12,9 +12,30 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-ds!y$p%@^26&k7
 # DEBUG: set to False in production (cPanel: DJANGO_DEBUG=0)
 DEBUG = os.environ.get('DJANGO_DEBUG', '1') == '1'
 
-# ALLOWED_HOSTS: set in production (cPanel: DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com)
+# ALLOWED_HOSTS: hostnames only, no https:// (e.g. pdfserver.nest.net.np,www.pdfserver.nest.net.np)
 _allowed = os.environ.get('DJANGO_ALLOWED_HOSTS', '')
-ALLOWED_HOSTS = [h.strip() for h in _allowed.split(',') if h.strip()] or ['*', '10.0.2.2']
+ALLOWED_HOSTS = [h.strip() for h in _allowed.split(',') if h.strip()] or [
+    'pdfserver.nest.net.np',
+    'www.pdfserver.nest.net.np',
+    '*'
+]
+
+# CSRF: required for HTTPS in Django 4.0+ – origins with scheme
+_csrf_origins = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(',') if o.strip()] or [
+    'https://pdfserver.nest.net.np',
+    'https://www.pdfserver.nest.net.np',
+]
+
+# Required when behind HTTPS proxy (cPanel, Apache) – Django sees HTTP, proxy sends X-Forwarded-Proto
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Cookie settings for HTTPS
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax'
+
 AUTH_USER_MODEL = 'pdf_app.User'  # THIS LINE IS CRITICAL!
 
 # Application definition
@@ -100,9 +121,9 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'static'),
-]
+# Include project static dir only if it exists
+_static_dir = os.path.join(BASE_DIR, 'static')
+STATICFILES_DIRS = [_static_dir] if os.path.isdir(_static_dir) else []
 
 
 
@@ -181,12 +202,22 @@ LOGGING = {
             'class': 'logging.FileHandler',
             'filename': os.path.join(BASE_DIR, 'debug.log'),
         },
+        'request_file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'django_error.log'),
+        },
     },
     'loggers': {
         'django': {
             'handlers': ['file'],
             'level': 'ERROR',
             'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['request_file'],
+            'level': 'ERROR',
+            'propagate': False,
         },
     },
 }
