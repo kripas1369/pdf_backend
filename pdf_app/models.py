@@ -901,7 +901,7 @@ class FeedPost(models.Model):
         ('APPROVED', 'Approved'),
         ('REJECTED', 'Rejected'),
     ]
-    image = models.ImageField(upload_to='feed_posts/', blank=True, null=True)
+    image = models.ImageField(upload_to='feed_posts/', blank=True, null=True)  # legacy single image; new posts use FeedPostImage
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     created_by = models.ForeignKey(
@@ -925,6 +925,20 @@ class FeedPost(models.Model):
 
     def __str__(self):
         return self.title[:50] if self.title else 'Untitled'
+
+
+class FeedPostImage(models.Model):
+    """Up to 5 images per feed post. Order preserved by 'order' field."""
+    post = models.ForeignKey(FeedPost, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='feed_posts/')
+    order = models.PositiveSmallIntegerField(default=0, help_text='Display order (0-based).')
+
+    class Meta:
+        ordering = ['order']
+        indexes = [models.Index(fields=['post'])]
+
+    def __str__(self):
+        return f"Image #{self.order} for post #{self.post_id}"
 
 
 class FeedPostLike(models.Model):

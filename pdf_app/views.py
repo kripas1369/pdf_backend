@@ -1242,13 +1242,16 @@ class FeedPostDetailView(generics.RetrieveAPIView):
 class FeedPostCreateView(generics.CreateAPIView):
     """
     POST /api/feed/create/
-    Create a TU Notice post (multipart: image, title, description). Status = PENDING until admin approves.
+    Create a TU Notice post (multipart: images [up to 5], title, description). Status = PENDING until admin approves.
     """
     serializer_class = FeedPostCreateSerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user, status='PENDING')
+        post = serializer.save(created_by=self.request.user, status='PENDING')
+        # Accept up to 5 images via multipart field 'images' (multiple files)
+        for order, file in enumerate(self.request.FILES.getlist('images')[:5]):
+            FeedPostImage.objects.create(post=post, image=file, order=order)
 
 
 class MyFeedPostsListView(generics.ListAPIView):

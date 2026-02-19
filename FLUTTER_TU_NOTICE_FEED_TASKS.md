@@ -14,7 +14,7 @@ The **TU Notice Feed** is a Facebook-style feed: users can **create posts** (ima
 |--------|----------|------|-------------|
 | GET | `feed/` | No | List **approved** feed posts (newest first) |
 | GET | `feed/<id>/` | No | Single post detail |
-| POST | `feed/create/` | **Yes** | Create a new post (multipart: image, title, description) → status PENDING |
+| POST | `feed/create/` | **Yes** | Create a new post (multipart: **up to 5 images** as `images`, title, description) → status PENDING |
 | GET | `feed/my-posts/` | **Yes** | List current user's posts (all statuses: PENDING, APPROVED, REJECTED) |
 | GET | `feed/bookmarks/` | **Yes** | List feed posts the current user has bookmarked (newest first) |
 | POST | `feed/<id>/like/` | **Yes** | Like the post (idempotent) |
@@ -35,6 +35,10 @@ The **TU Notice Feed** is a Facebook-style feed: users can **create posts** (ima
   "id": 1,
   "image": "/media/feed_posts/photo.jpg",
   "image_url": "https://yourserver.com/media/feed_posts/photo.jpg",
+  "image_urls": [
+    "https://yourserver.com/media/feed_posts/photo1.jpg",
+    "https://yourserver.com/media/feed_posts/photo2.jpg"
+  ],
   "title": "Exam Tips 2079",
   "description": "Important tips for upcoming exams...",
   "created_by": 5,
@@ -49,7 +53,9 @@ The **TU Notice Feed** is a Facebook-style feed: users can **create posts** (ima
 }
 ```
 
-- **image_url** – Use this in Flutter to display the image (full URL). `image` can be `null` (show placeholder).
+- **image_urls** – **List of up to 5 image URLs** for this post. Use this in Flutter to show a carousel/gallery (e.g. PageView or horizontal list). Order is preserved from upload.
+- **image_url** – First image URL (backward compatibility). Prefer **image_urls** for multi-photo support.
+- **image** – Legacy relative path; can be `null`. Prefer **image_url** or **image_urls** for display.
 - **created_by** – User ID of the author; **created_by_phone** – phone (for display, e.g. “Posted by 98***678”).
 - **status** – Shown only to **admin** or **post author**; values: `PENDING`, `APPROVED`, `REJECTED`. In the public feed list you only get approved posts; in **my-posts** you see your own with status.
 - **like_count**, **is_liked** – Like count and whether current user liked.
@@ -62,10 +68,10 @@ The **TU Notice Feed** is a Facebook-style feed: users can **create posts** (ima
 - **Content-Type:** `multipart/form-data`
 - **Auth:** Required (Bearer token)
 - **Fields:**
-  - `image` – (optional) image file
+  - **`images`** – (optional) **up to 5 image files**. Send as **multiple parts with the same field name** `images` (e.g. in Flutter: add 1–5 file parts each with key `images`).
   - `title` – (required) string
   - `description` – (optional) string
-- **Response:** 201 and the created post object (with `status: "PENDING"`). Post will **not** appear in the main feed until admin approves it.
+- **Response:** 201 and the created post object (with `status: "PENDING"`, `image_urls` array). Post will **not** appear in the main feed until admin approves it.
 
 ---
 
@@ -125,12 +131,12 @@ Use the returned post to update local state.
 
 ### 1. Data layer
 
-- [ ] Extend/define **FeedPost** model: `id`, `image`, `imageUrl`, `title`, `description`, `createdBy`, `createdByPhone`, `status`, `likeCount`, `isLiked`, `commentCount`, `isBookmarked`, `createdAt`, `updatedAt`.
+- [ ] Extend/define **FeedPost** model: `id`, `image`, `imageUrl`, **`imageUrls`** (list of up to 5 URLs), `title`, `description`, `createdBy`, `createdByPhone`, `status`, `likeCount`, `isLiked`, `commentCount`, `isBookmarked`, `createdAt`, `updatedAt`.
 - [ ] Define **FeedPostComment** model: `id`, `user`, `userPhone`, `text`, `createdAt`.
 - [ ] API service methods:
   - `getFeedPosts()` → `GET feed/`
   - `getFeedPost(id)` → `GET feed/<id>/`
-  - `createFeedPost({image, title, description})` → `POST feed/create/` (multipart, auth)
+  - `createFeedPost({images, title, description})` → `POST feed/create/` (multipart: **up to 5 files** under field name `images`, auth)
   - `getMyFeedPosts()` → `GET feed/my-posts/` (auth)
   - `getMyFeedBookmarks()` → `GET feed/bookmarks/` (auth)
   - `likeFeedPost(id)` → `POST feed/<id>/like/` (auth)
@@ -144,15 +150,15 @@ Use the returned post to update local state.
 ### 2. TU Notice Feed screen (list)
 
 - [ ] **Screen name:** **TU Notice Feed**
-- [ ] List of **approved** posts (from `GET feed/`): image (or placeholder), title, description (truncated), author (e.g. created_by_phone masked), like count, comment count, like button, bookmark button.
+- [ ] List of **approved** posts (from `GET feed/`): **first image from `image_urls`** (or placeholder if empty), title, description (truncated), author (e.g. created_by_phone masked), like count, comment count, like button, bookmark button.
 - [ ] Pull-to-refresh to reload the list.
 - [ ] Tap post → open **post detail** screen (full content, comments, like, bookmark).
 - [ ] **FAB or header button:** “Create post” → open **Create post** screen (only when logged in; otherwise prompt login).
 
 ### 3. Create post screen
 
-- [ ] Form: **image** (optional; pick from gallery/camera), **title** (required), **description** (optional).
-- [ ] Submit with **multipart/form-data** to `POST feed/create/`.
+- [ ] Form: **1–5 images** (optional; pick from gallery/camera; allow adding multiple, max 5), **title** (required), **description** (optional).
+- [ ] Submit with **multipart/form-data** to `POST feed/create/`: send each image as a part with the **same field name** `images` (e.g. `request.files['images']` list or append 1–5 parts with key `images`).
 - [ ] On success: show message “Post submitted. It will appear in the feed after approval.” and navigate back (e.g. to feed or to “My posts”).
 - [ ] On 401: prompt login and retry after auth.
 
@@ -187,7 +193,8 @@ Use the returned post to update local state.
 
 ### 8. Post detail screen
 
-- [ ] Full image (if any), title, description, author, like button + count, bookmark button, comment count.
+- [ ] **Image carousel/gallery**: use **`image_urls`** (up to 5 images). Show as PageView or horizontal scroll; dots or “1/5” indicator. If no images, show placeholder.
+- [ ] Title, description, author, like button + count, bookmark button, comment count.
 - [ ] Comment list and add-comment input as above.
 - [ ] Same like/bookmark behavior as in the list.
 
@@ -202,7 +209,7 @@ Use the returned post to update local state.
 ## UI/UX Hints
 
 - **Screen title:** Use **“TU Notice Feed”** consistently (app bar, navigation, documentation).
-- **Images:** Use `image_url`; if null, show a placeholder. Prefer cached network images.
+- **Images:** Use **`image_urls`** for multi-photo posts (carousel on detail; first image on list). Fallback to `image_url`; if null/empty, show a placeholder. Prefer cached network images.
 - **Author:** Display `created_by_phone` masked (e.g. “98***678”) or “Anonymous” if not present.
 - **Status (my posts):** Use distinct colors/labels for PENDING (e.g. orange “Under review”), APPROVED (green), REJECTED (red).
 - **Create post:** Validate title required; show clear error if image upload fails or server returns 4xx/5xx.
@@ -222,4 +229,36 @@ Use the returned post to update local state.
 | Detail screen | Full post + like, bookmark, comments list, add comment |
 | States | Loading, empty, error for list/detail/comments/create |
 
-All authenticated endpoints require `Authorization: Bearer <access_token>`. Use **image_url** for display and the returned post/comment objects to keep the UI in sync after like, bookmark, and comment actions.
+All authenticated endpoints require `Authorization: Bearer <access_token>`. Use **image_urls** (and **image_url** as fallback) for display and the returned post/comment objects to keep the UI in sync after like, bookmark, and comment actions.
+
+---
+
+## Flutter update: support up to 5 photos per post
+
+**Backend change:** Feed posts now support **up to 5 images** per post. Use the following in your Flutter app.
+
+### API changes
+
+| What | Before | After |
+|------|--------|--------|
+| Create post | Single optional `image` file | **Up to 5 images** with the **same field name** `images` (multipart) |
+| Post response | `image_url` (single) | **`image_urls`** (list of strings, max 5). `image_url` still present (first image) |
+
+### Flutter tasks
+
+1. **Model**  
+   - Add `imageUrls` (e.g. `List<String>?`) to your FeedPost model and parse from API `image_urls`.  
+   - Keep `imageUrl` for backward compatibility (first image).
+
+2. **Create post**  
+   - Let user pick **1–5 photos** (gallery/camera).  
+   - Build multipart request: for each chosen file, add a part with **name `images`** (same key for all).  
+   - Example (concept): `multipartRequest.files.addAll([MapEntry('images', file1), MapEntry('images', file2), ...])` so the server receives multiple files under `images`.  
+   - Do **not** send a single field `image`; use **`images`** (plural) and up to 5 files.
+
+3. **Feed list**  
+   - Show **first image** from `image_urls` (or `image_url`) as the post thumbnail; if empty, show placeholder.
+
+4. **Post detail**  
+   - Show all images in **`image_urls`** in a **PageView** or horizontal carousel with dots/indicator (e.g. “1/5”).  
+   - Fallback to `image_url` if `image_urls` is null or empty.

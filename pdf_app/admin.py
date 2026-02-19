@@ -1174,6 +1174,12 @@ class UserRoutineReminderAdmin(admin.ModelAdmin):
 # TU NOTICE FEED (user posts, admin approval, like, bookmark, comment)
 # ========================================
 
+class FeedPostImageInline(admin.TabularInline):
+    model = FeedPostImage
+    extra = 0
+    ordering = ['order']
+
+
 @admin.register(FeedPost)
 class FeedPostAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = [
@@ -1185,13 +1191,21 @@ class FeedPostAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_editable = ['status', 'is_active']
     readonly_fields = ['image_preview', 'created_at', 'updated_at']
     raw_id_fields = ['created_by']
+    inlines = [FeedPostImageInline]
 
     def image_preview(self, obj):
-        if obj and obj.pk and obj.image:
-            return format_html(
-                '<img src="{}" style="max-width:80px;height:auto;border-radius:6px;"/>',
-                obj.image.url
-            )
+        if obj and obj.pk:
+            first_img = obj.images.order_by('order').first()
+            if first_img and first_img.image:
+                return format_html(
+                    '<img src="{}" style="max-width:80px;height:auto;border-radius:6px;"/>',
+                    first_img.image.url
+                )
+            if obj.image:
+                return format_html(
+                    '<img src="{}" style="max-width:80px;height:auto;border-radius:6px;"/>',
+                    obj.image.url
+                )
         return '–'
     image_preview.short_description = 'Image'
 

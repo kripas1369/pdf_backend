@@ -20,19 +20,22 @@ ALLOWED_HOSTS = [h.strip() for h in _allowed.split(',') if h.strip()] or [
     '*'
 ]
 
-# CSRF: required for HTTPS in Django 4.0+ – origins with scheme
+# CSRF: required for Django 4.0+ – must include the EXACT URL you use in the browser (with https:// or http://)
+# On server (cPanel): set env CSRF_TRUSTED_ORIGINS=https://pdfserver.nest.net.np,https://www.pdfserver.nest.net.np
 _csrf_origins = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(',') if o.strip()] or [
     'https://pdfserver.nest.net.np',
     'https://www.pdfserver.nest.net.np',
+    'http://pdfserver.nest.net.np',
+    'http://www.pdfserver.nest.net.np',
 ]
 
 # Required when behind HTTPS proxy (cPanel, Apache) – Django sees HTTP, proxy sends X-Forwarded-Proto
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# Cookie settings for HTTPS
-CSRF_COOKIE_SECURE = True
-SESSION_COOKIE_SECURE = True
+# Cookie settings: Secure=True only over HTTPS. If you get CSRF 403 over HTTP, set CSRF_COOKIE_SECURE=0 in env.
+CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'True').lower() in ('1', 'true', 'yes')
+SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True').lower() in ('1', 'true', 'yes')
 CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SAMESITE = 'Lax'
 

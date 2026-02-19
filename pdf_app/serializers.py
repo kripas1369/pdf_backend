@@ -788,6 +788,7 @@ class UserRoutineReminderSerializer(serializers.ModelSerializer):
 
 class FeedPostSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    image_urls = serializers.SerializerMethodField()
     like_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
     comment_count = serializers.SerializerMethodField()
@@ -797,20 +798,39 @@ class FeedPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeedPost
         fields = [
-            'id', 'image', 'image_url', 'title', 'description',
+            'id', 'image', 'image_url', 'image_urls', 'title', 'description',
             'created_by', 'created_by_phone', 'status',
             'like_count', 'is_liked', 'comment_count', 'is_bookmarked',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'status']
 
+    def _build_absolute_uri(self, url):
+        if not url:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(url)
+        return url
+
     def get_image_url(self, obj):
-        if obj.image:
+        """First image URL (for backward compatibility)."""
+        urls = self._get_image_url_list(obj)
+        return urls[0] if urls else None
+
+    def _get_image_url_list(self, obj):
+        """Ordered list of image URLs: from FeedPostImage, else legacy single image."""
+        images = list(obj.images.all().order_by('order'))
+        if images:
             request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-            return obj.image.url
-        return None
+            return [self._build_absolute_uri(img.image.url) for img in images]
+        if obj.image:
+            return [self._build_absolute_uri(obj.image.url)]
+        return []
+
+    def get_image_urls(self, obj):
+        """List of up to 5 image URLs for this post."""
+        return self._get_image_url_list(obj)
 
     def get_like_count(self, obj):
         return getattr(obj, '_like_count', obj.likes.count())
@@ -846,10 +866,10 @@ class FeedPostSerializer(serializers.ModelSerializer):
 
 
 class FeedPostCreateSerializer(serializers.ModelSerializer):
-    """Create a TU Notice post (image + text). Status will be PENDING until admin approves."""
+    """Create a TU Notice post (up to 5 images + text). Status will be PENDING until admin approves. Send images as multipart field 'images' (multiple files)."""
     class Meta:
         model = FeedPost
-        fields = ['image', 'title', 'description']
+        fields = ['title', 'description']
 
 
 class FeedPostCommentSerializer(serializers.ModelSerializer):
