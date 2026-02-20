@@ -7,6 +7,7 @@ __pycache__/
 
 # Django
 db.sqlite3
+db.sqlite3.zip
 media/
 staticfiles/
 solution_pdfs/
