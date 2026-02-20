@@ -69,11 +69,12 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'phone', 'name', 'referral_code',
+            'is_verified',
             'pdf_views_count', 'days_since_install',
             'has_profile', 'subscription_tier', 'messages_remaining',
             'created_at'
         ]
-        read_only_fields = ['id', 'referral_code', 'created_at']
+        read_only_fields = ['id', 'referral_code', 'is_verified', 'created_at']
     
     def get_has_profile(self, obj):
         return hasattr(obj, 'student_profile')

@@ -401,6 +401,14 @@ class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
         ]
         return custom_urls + urls
     
+    def _grant_verified_if_paid(self, payment):
+        """If payment is for a paid purchase (amount > 0), mark user as verified (blue tick)."""
+        if payment.amount and payment.amount > 0:
+            u = payment.user
+            if not u.is_verified:
+                u.is_verified = True
+                u.save(update_fields=['is_verified'])
+
     def approve_payment(self, request, payment_id):
         """Approve payment and grant access (subscription or unlock PDF)"""
         payment = Payment.objects.get(pk=payment_id)
@@ -424,6 +432,7 @@ class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
                     pdf=pdf,
                     defaults={'payment': payment}
                 )
+        self._grant_verified_if_paid(payment)
         
         messages.success(request, f'Payment {str(payment.payment_id)[:8]} approved successfully!')
         return redirect('admin:pdf_app_payment_change', payment_id)
@@ -463,7 +472,7 @@ class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
                         pdf=pdf,
                         defaults={'payment': payment}
                     )
-            
+            self._grant_verified_if_paid(payment)
             count += 1
         
         self.message_user(request, f'{count} payment(s) approved successfully!')
@@ -501,6 +510,7 @@ class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
                         pdf=pdf,
                         defaults={'payment': obj}
                     )
+            self._grant_verified_if_paid(obj)
 
 
 # ========================================
@@ -771,11 +781,20 @@ class UserUploadedSubjectInline(admin.TabularInline):
 
 # User Admin (custom) – shows all student uploads for approval
 class CustomUserAdmin(IntegrityErrorMixin, admin.ModelAdmin):
-    list_display = ['phone', 'name', 'referral_code', 'is_active', 'uploaded_pdfs_count', 'uploaded_pending_count', 'created_at']
-    list_filter = ['is_active', 'is_staff']
+    list_display = ['phone', 'name', 'referral_code', 'verified_badge', 'is_verified', 'is_active', 'uploaded_pdfs_count', 'uploaded_pending_count', 'created_at']
+    list_editable = ['is_verified']
+    list_filter = ['is_active', 'is_staff', 'is_verified']
     search_fields = ['phone', 'name', 'referral_code']
     readonly_fields = ['referral_code', 'created_at', 'last_login']
     inlines = [UserUploadedPDFInline, UserUploadedTopicInline, UserUploadedSubjectInline]
+    fields = ['phone', 'name', 'is_verified', 'is_active', 'first_opened_at', 'pdf_views_count', 'days_since_install',
+              'referral_code', 'referred_by', 'created_at', 'last_login']
+
+    def verified_badge(self, obj):
+        if obj.is_verified:
+            return format_html('<span style="color:#1d9bf0;">✓ Verified</span>')
+        return '—'
+    verified_badge.short_description = 'Blue tick'
 
     def uploaded_pdfs_count(self, obj):
         return obj.uploaded_pdfs.count()

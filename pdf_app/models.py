@@ -67,6 +67,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     referral_code = models.CharField(max_length=20, unique=True, blank=True, db_index=True)
     referred_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
     
+    # Blue tick verification (paid purchase or admin-granted)
+    is_verified = models.BooleanField(
+        default=False,
+        help_text='Verified account (blue tick). Set automatically when user buys any paid package, or manually by admin.'
+    )
+    
     # Django Auth Fields
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
