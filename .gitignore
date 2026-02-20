@@ -5,7 +5,8 @@ __pycache__/
 *.so
 .Python
 
-# Django (db.sqlite3 is tracked; media/ is not)
+# Django
+db.sqlite3
 media/
 staticfiles/
 solution_pdfs/
