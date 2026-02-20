@@ -1,0 +1,7 @@
+# Copy this file to your server as:  media/.htaccess
+# So Apache serves PDFs from /media/ with caching (faster repeat loads).
+
+# Cache PDFs for 7 days (604800 seconds)
+<FilesMatch "\.pdf$">
+    Header set Cache-Control "public, max-age=604800"
+</FilesMatch>

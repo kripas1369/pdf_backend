@@ -15,10 +15,9 @@ urlpatterns = [
     path('privacy_policy', privacy_policy),
 ]
 
-# Serve media/static in development; in production configure cPanel/Apache to serve these
+# Serve media/static in development only.
+# Production (cPanel): Apache must serve /media/ directly (see CPANEL_MEDIA_SETUP.md).
+# Do NOT serve media via Django in production so PDFs use direct URLs and caching.
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-else:
-    # Production: still serve media (user uploads) via Django if no Apache alias
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -3,6 +3,7 @@
 from rest_framework import viewsets, generics, status
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model, authenticate
@@ -1020,6 +1021,35 @@ class MyPDFUploadsView(generics.ListAPIView):
         return PDFFile.objects.filter(uploaded_by=self.request.user).select_related('subject').order_by('-created_at')
 
 
+class StudentPDFDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET /api/student-pdfs/<id>/ – Get one of current user's PDF uploads.
+    PATCH /api/student-pdfs/<id>/ – Update details (title, subtitle, year, subject, optional file). Owner only.
+    DELETE /api/student-pdfs/<id>/ – Delete the upload. Owner only.
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = MyPDFUploadSerializer
+
+    def get_queryset(self):
+        return PDFFile.objects.filter(uploaded_by=self.request.user).select_related('subject')
+
+    def get_serializer_class(self):
+        if self.request.method in ('PATCH', 'PUT'):
+            return StudentPDFUpdateSerializer
+        return MyPDFUploadSerializer
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', True)
+        instance = self.get_object()
+        serializer = StudentPDFUpdateSerializer(instance, data=request.data, partial=partial, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(MyPDFUploadSerializer(instance).data)
+    
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
 class FeedbackCreateView(generics.CreateAPIView):
     queryset = Feedback.objects.all()
     serializer_class = FeedbackSerializer
@@ -1278,6 +1308,19 @@ class MyFeedBookmarksListView(generics.ListAPIView):
         return _feed_post_queryset(self.request, approved_only=True).filter(
             bookmarks__user=self.request.user
         ).distinct()
+
+
+@api_view(['DELETE', 'POST'])
+@permission_classes([IsAuthenticated])
+def feed_post_delete(request, pk):
+    """
+    DELETE /api/feed/<id>/delete/ – Delete a TU Notice post. Only the user who created it can delete.
+    """
+    post = get_object_or_404(FeedPost, pk=pk)
+    if post.created_by_id != request.user.id:
+        raise PermissionDenied('You can only delete your own posts.')
+    post.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(['POST'])

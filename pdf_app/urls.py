@@ -105,6 +105,7 @@ urlpatterns = [
     # ========================================
     path('student-pdfs/upload/', views.StudentPDFUploadView.as_view(), name='student-pdf-upload'),
     path('student-pdfs/my-uploads/', views.MyPDFUploadsView.as_view(), name='my-pdf-uploads'),
+    path('student-pdfs/<int:pk>/', views.StudentPDFDetailView.as_view(), name='student-pdf-detail'),
 
     # ========================================
     # EXISTING PDF APIs
@@ -146,6 +147,7 @@ urlpatterns = [
     path('feed/my-posts/', views.MyFeedPostsListView.as_view(), name='feed-my-posts'),
     path('feed/bookmarks/', views.MyFeedBookmarksListView.as_view(), name='feed-bookmarks-list'),
     path('feed/<int:pk>/', views.FeedPostDetailView.as_view(), name='feed-detail'),
+    path('feed/<int:pk>/delete/', views.feed_post_delete, name='feed-delete'),
     path('feed/<int:pk>/approve/', views.feed_post_approve, name='feed-approve'),
     path('feed/<int:pk>/reject/', views.feed_post_reject, name='feed-reject'),
     path('feed/<int:pk>/like/', views.feed_post_like, name='feed-like'),

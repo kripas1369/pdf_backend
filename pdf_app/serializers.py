@@ -97,7 +97,9 @@ class UserSerializer(serializers.ModelSerializer):
 # ============================================
 
 class PDFFileSerializer(serializers.ModelSerializer):
-    """PDF list/detail with has_access and is_locked for app (free / purchased / subscription)."""
+    """PDF list/detail with has_access and is_locked for app (free / purchased / subscription).
+    Returns absolute file URL so the app can open PDFs via direct URL (Apache serves, not Django)."""
+    file = serializers.SerializerMethodField()
     is_locked = serializers.SerializerMethodField()
     has_access = serializers.SerializerMethodField()
     price = serializers.SerializerMethodField()
@@ -110,6 +112,16 @@ class PDFFileSerializer(serializers.ModelSerializer):
             'pdf_type', 'is_solution', 'is_premium', 'price',
             'is_locked', 'has_access'
         ]
+
+    def get_file(self, obj):
+        """Absolute URL so app can open PDF directly (Apache serves /media/)."""
+        if not obj.file:
+            return ''
+        url = obj.file.url
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(url)
+        return url
 
     def get_is_premium(self, obj):
         """Solution and Question+Solution PDFs are always premium."""
@@ -224,6 +236,31 @@ class StudentPDFUploadSerializer(serializers.ModelSerializer):
         validated_data['is_premium'] = False
         validated_data['price'] = Decimal('0.00')
         return super().create(validated_data)
+
+
+class StudentPDFUpdateSerializer(serializers.ModelSerializer):
+    """Update student's own PDF upload (partial: title, subtitle, year, subject, optional file)."""
+    MAX_FILE_SIZE = 15 * 1024 * 1024  # 15MB
+    ALLOWED_EXTENSIONS = ('pdf',)
+
+    class Meta:
+        model = PDFFile
+        fields = ['title', 'subtitle', 'year', 'subject', 'file']
+
+    def validate_year(self, value):
+        if value is not None and (value < 1990 or value > 2100):
+            raise serializers.ValidationError('Year must be between 1990 and 2100.')
+        return value
+
+    def validate_file(self, value):
+        if not value:
+            return value
+        if value.size > self.MAX_FILE_SIZE:
+            raise serializers.ValidationError('File size must not exceed 15MB.')
+        ext = (value.name or '').split('.')[-1].lower()
+        if ext not in self.ALLOWED_EXTENSIONS:
+            raise serializers.ValidationError('Only PDF files are allowed.')
+        return value
 
 
 class MyPDFUploadSerializer(serializers.ModelSerializer):
