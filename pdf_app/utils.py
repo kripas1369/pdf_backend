@@ -1,24 +1,84 @@
 # pdf_app/utils.py - HELPER FUNCTIONS
 
+import json
+import ssl
+import urllib.parse
+import urllib.request
+
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 from .models import *
 
 # ============================================
-# OTP DELIVERY (forgot password)
+# OTP DELIVERY (forgot password) – AakashSMS
 # ============================================
-# Twilio removed for production. Plug in your 3rd party SMS/OTP API here when ready.
+# API: https://sms.aakashsms.com/sms/v3/send
+# Params: auth_token, to (10-digit mobile), text
+
+
+def _normalize_phone_for_aakashsms(phone):
+    """Convert phone to 10-digit Nepal format (e.g. 9812345678)."""
+    if not phone:
+        return ''
+    s = ''.join(c for c in str(phone) if c.isdigit())
+    if s.startswith('977'):
+        s = s[3:]
+    if len(s) > 10:
+        s = s[-10:]
+    return s[:10]
 
 
 def send_whatsapp_otp(phone, otp):
     """
     Send OTP to the user (forgot password).
-    Currently prints OTP to terminal only. Replace with your SMS/OTP provider later.
+    Uses AakashSMS (aakashsms.com) when AAKASHSMS_AUTH_TOKEN is set.
+    Otherwise prints OTP to terminal if DEBUG_PRINT_OTP is True.
     """
+    auth_token = getattr(settings, 'AAKASHSMS_AUTH_TOKEN', '') or ''
+    if auth_token:
+        to_number = _normalize_phone_for_aakashsms(phone)
+        if len(to_number) != 10:
+            if getattr(settings, 'DEBUG_PRINT_OTP', True):
+                print("[OTP] %s: %s (invalid 10-digit number, not sent via SMS)" % (phone, otp))
+            return False
+        text = f"Bachelor Question Bank: Your password reset OTP is: {otp}. Do not share."
+        data = urllib.parse.urlencode({
+            'auth_token': auth_token,
+            'to': to_number,
+            'text': text,
+        }).encode('utf-8')
+        req = urllib.request.Request(
+            'https://sms.aakashsms.com/sms/v3/send',
+            data=data,
+            method='POST',
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        # Use SSL context that doesn't verify (avoids CERTIFICATE_VERIFY_FAILED on macOS/some installs)
+        ssl_ctx = ssl.create_default_context()
+        try:
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+        except Exception:
+            pass
+        try:
+            with urllib.request.urlopen(req, timeout=15, context=ssl_ctx) as resp:
+                body = resp.read().decode('utf-8')
+                result = json.loads(body) if body else {}
+                if result.get('error') is False:
+                    if getattr(settings, 'DEBUG_PRINT_OTP', True):
+                        print(f"[OTP] Sent via AakashSMS to {to_number}")
+                    return True
+                # API returned error (invalid token, no balance, etc.)
+                if getattr(settings, 'DEBUG_PRINT_OTP', True):
+                    print("[OTP] AakashSMS error: %s" % result.get('message', body))
+                return False
+        except Exception as e:
+            if getattr(settings, 'DEBUG_PRINT_OTP', True):
+                print("[OTP] AakashSMS request failed: %s" % e)
+            return False
     if getattr(settings, 'DEBUG_PRINT_OTP', True):
-        print(f"📱 OTP for {phone}: {otp}")
-    # TODO: Integrate 3rd party SMS/OTP API here (e.g. send to phone via SMS gateway)
+        print("[OTP] %s: %s" % (phone, otp))
     return True
 
 
@@ -92,17 +152,18 @@ def get_pdfs_for_package(package):
     Uses package.pdfs (M2M). If empty, fallback by package_type:
     SUBJECT -> subject_id, TOPIC -> topic_id, YEAR -> year, ALL_YEARS -> all PDFs.
     Respects content_type (ALL / SOLUTIONS / QUESTIONS).
+    Only includes is_approved PDFs so access is granted only to visible content.
     """
     if package.pdfs.exists():
-        qs = package.pdfs.all()
+        qs = package.pdfs.filter(is_approved=True)
     elif package.package_type == 'SUBJECT' and package.subject_id:
-        qs = PDFFile.objects.filter(subject_id=package.subject_id)
+        qs = PDFFile.objects.filter(subject_id=package.subject_id, is_approved=True)
     elif package.package_type == 'TOPIC' and package.topic_id:
-        qs = PDFFile.objects.filter(subject__topic_id=package.topic_id)
+        qs = PDFFile.objects.filter(subject__topic_id=package.topic_id, is_approved=True)
     elif package.package_type == 'YEAR' and package.year:
-        qs = PDFFile.objects.filter(year=package.year)
+        qs = PDFFile.objects.filter(year=package.year, is_approved=True)
     elif package.package_type == 'ALL_YEARS':
-        qs = PDFFile.objects.all()
+        qs = PDFFile.objects.filter(is_approved=True)
     else:
         return PDFFile.objects.none()
 
@@ -192,6 +253,29 @@ def get_package_accessible_pdf_ids(user, pdf_queryset):
                 accessible.add(pdf.id)
                 break
     return accessible
+
+
+# ============================================
+# PACKAGE ACCESS GRANT (when payment approved)
+# ============================================
+
+def grant_package_access(payment):
+    """
+    When a package payment (SUBJECT_PACKAGE, TOPIC_PACKAGE, YEAR_PACKAGE, FULL_PACKAGE)
+    is approved, create PdfAccess for every PDF in that package so is_locked/has_access
+    and check-access endpoint return correctly.
+    """
+    if payment.payment_type not in ('SUBJECT_PACKAGE', 'TOPIC_PACKAGE', 'YEAR_PACKAGE', 'FULL_PACKAGE'):
+        return
+    pkg = getattr(payment, 'purchased_package', None)
+    if not pkg:
+        return
+    for pdf in get_pdfs_for_package(pkg):
+        PdfAccess.objects.get_or_create(
+            user=payment.user,
+            pdf=pdf,
+            defaults={'payment': payment}
+        )
 
 
 # ============================================

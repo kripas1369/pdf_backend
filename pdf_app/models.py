@@ -321,6 +321,13 @@ class PDFPackage(models.Model):
 class Feedback(models.Model):
     """User feedback"""
     
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='feedbacks',
+    )
     name = models.CharField(max_length=100)
     description = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -785,6 +792,38 @@ class UserActivity(models.Model):
         return f"{self.user.phone} - {self.date}"
 
 
+class UserTopicUsage(models.Model):
+    """
+    Tracks which topic each user used and how much (per day).
+    Used to see which topics are most used in the app and which users use which topics most.
+    Flutter app sends topic_usage when logging usage (e.g. when user opens a topic or views PDFs under it).
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='topic_usages')
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='user_usages')
+    date = models.DateField(db_index=True)
+    usage_count = models.PositiveIntegerField(
+        default=0,
+        help_text='Number of times user opened/viewed this topic (or PDFs under it) on this day.'
+    )
+    time_spent_minutes = models.PositiveIntegerField(
+        default=0,
+        help_text='Optional: minutes spent in this topic on this day.'
+    )
+
+    class Meta:
+        unique_together = ['user', 'topic', 'date']
+        ordering = ['-date', '-usage_count']
+        indexes = [
+            models.Index(fields=['topic', '-date']),
+            models.Index(fields=['user', '-date']),
+        ]
+        verbose_name = 'User topic usage'
+        verbose_name_plural = 'User topic usage'
+
+    def __str__(self):
+        return f"{self.user.phone} – {self.topic.name} ({self.date}): {self.usage_count}"
+
+
 # ========================================
 # NOTIFICATIONS (all users; pin / save for later)
 # ========================================
@@ -934,7 +973,7 @@ class FeedPost(models.Model):
 
 
 class FeedPostImage(models.Model):
-    """Up to 5 images per feed post. Order preserved by 'order' field."""
+    """Up to 10 images per feed post. Order preserved by 'order' field."""
     post = models.ForeignKey(FeedPost, on_delete=models.CASCADE, related_name='images')
     image = models.ImageField(upload_to='feed_posts/')
     order = models.PositiveSmallIntegerField(default=0, help_text='Display order (0-based).')

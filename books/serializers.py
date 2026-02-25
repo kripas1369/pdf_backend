@@ -118,8 +118,11 @@ class BookCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_front_image(self, value):
+        # On create, front_image is required. On update (partial), omit or send empty to keep existing.
         if not value:
-            raise serializers.ValidationError('Front image is required.')
+            if self.instance is None:
+                raise serializers.ValidationError('Front image is required.')
+            return getattr(self.instance, 'front_image', None)
         if value.size > self.MAX_IMAGE_SIZE:
             raise serializers.ValidationError('Image size must not exceed 5MB.')
         ext = value.name.split('.')[-1].lower() if value.name else ''

@@ -173,10 +173,10 @@ class BookBookingsListView(APIView):
 
 
 class BookUpdateView(APIView):
-    """PATCH /api/books/<id>/update/ — Update book (seller only, partial)."""
+    """PATCH or PUT /api/books/<id>/update/ — Edit book details (seller only, partial)."""
     permission_classes = [IsAuthenticated]
 
-    def patch(self, request, pk):
+    def _update(self, request, pk):
         try:
             book = Book.objects.get(pk=pk)
         except Book.DoesNotExist:
@@ -201,6 +201,12 @@ class BookUpdateView(APIView):
             book, context={'request': request}
         )
         return Response(detail_serializer.data)
+
+    def patch(self, request, pk):
+        return self._update(request, pk)
+
+    def put(self, request, pk):
+        return self._update(request, pk)
 
 
 class BookDeleteView(APIView):

@@ -15,8 +15,9 @@ from django.utils import timezone
 from django.urls import path, reverse
 from django.shortcuts import redirect
 from django.contrib import messages
+from django.db.models import Sum, Count
 from pdf_app.models import *
-from pdf_app.utils import grant_subscription_access, create_auto_groups, update_college_stats, get_pdfs_for_package
+from pdf_app.utils import grant_subscription_access, grant_package_access, create_auto_groups, update_college_stats, get_pdfs_for_package
 
 
 # ========================================
@@ -91,6 +92,24 @@ class IntegrityErrorMixin:
             )
             self.message_user(request, msg, messages.ERROR)
             raise ValueError(msg) from e
+
+    def changelist_view(self, request, extra_context=None):
+        """Catch IntegrityError/ValueError from admin actions (e.g. delete selected) so we show a message instead of 500."""
+        if request.method == 'POST':
+            try:
+                return super().changelist_view(request, extra_context)
+            except (ValueError, IntegrityError) as e:
+                if isinstance(e, ValueError):
+                    msg = str(e)
+                else:
+                    msg = (
+                        'Action failed: database constraint (e.g. FOREIGN KEY). '
+                        'A related record may have been deleted or the selection is invalid. '
+                        f'Details: {e}'
+                    )
+                self.message_user(request, msg, messages.ERROR)
+                return redirect(request.path)
+        return super().changelist_view(request, extra_context)
 
 
 # ========================================
@@ -425,13 +444,8 @@ class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
                 pdf=payment.purchased_pdf,
                 defaults={'payment': payment}
             )
-        elif payment.payment_type in ('SUBJECT_PACKAGE', 'TOPIC_PACKAGE', 'YEAR_PACKAGE', 'FULL_PACKAGE') and payment.purchased_package:
-            for pdf in get_pdfs_for_package(payment.purchased_package):
-                PdfAccess.objects.get_or_create(
-                    user=payment.user,
-                    pdf=pdf,
-                    defaults={'payment': payment}
-                )
+        else:
+            grant_package_access(payment)
         self._grant_verified_if_paid(payment)
         
         messages.success(request, f'Payment {str(payment.payment_id)[:8]} approved successfully!')
@@ -465,13 +479,8 @@ class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
                     pdf=payment.purchased_pdf,
                     defaults={'payment': payment}
                 )
-            elif payment.payment_type in ('SUBJECT_PACKAGE', 'TOPIC_PACKAGE', 'YEAR_PACKAGE', 'FULL_PACKAGE') and payment.purchased_package:
-                for pdf in get_pdfs_for_package(payment.purchased_package):
-                    PdfAccess.objects.get_or_create(
-                        user=payment.user,
-                        pdf=pdf,
-                        defaults={'payment': payment}
-                    )
+            else:
+                grant_package_access(payment)
             self._grant_verified_if_paid(payment)
             count += 1
         
@@ -503,13 +512,8 @@ class PaymentAdmin(IntegrityErrorMixin, admin.ModelAdmin):
                     pdf=obj.purchased_pdf,
                     defaults={'payment': obj}
                 )
-            elif obj.payment_type in ('SUBJECT_PACKAGE', 'TOPIC_PACKAGE', 'YEAR_PACKAGE', 'FULL_PACKAGE') and obj.purchased_package_id:
-                for pdf in get_pdfs_for_package(obj.purchased_package):
-                    PdfAccess.objects.get_or_create(
-                        user=obj.user,
-                        pdf=pdf,
-                        defaults={'payment': obj}
-                    )
+            else:
+                grant_package_access(obj)
             self._grant_verified_if_paid(obj)
 
 
@@ -779,6 +783,23 @@ class UserUploadedSubjectInline(admin.TabularInline):
     verbose_name_plural = 'Suggested Subjects (approve here or via Subject list)'
 
 
+class UserTopicUsageInline(admin.TabularInline):
+    """Show which topics this user used (for user activity / analytics)."""
+    model = UserTopicUsage
+    extra = 0
+    max_num = 0
+    can_delete = False
+    readonly_fields = ['topic', 'date', 'usage_count', 'time_spent_minutes']
+    ordering = ['-date', '-usage_count']
+    verbose_name = 'Topic usage'
+    verbose_name_plural = 'Topic usage (which topics this user used)'
+
+    def get_queryset(self, request):
+        # Do not slice here: Django filters this queryset by the parent user later,
+        # and "Cannot filter a query once a slice has been taken" would occur.
+        return super().get_queryset(request).select_related('topic')
+
+
 # User Admin (custom) – shows all student uploads for approval
 class CustomUserAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = ['phone', 'name', 'referral_code', 'verified_badge', 'is_verified', 'is_active', 'uploaded_pdfs_count', 'uploaded_pending_count', 'created_at']
@@ -786,7 +807,7 @@ class CustomUserAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_filter = ['is_active', 'is_staff', 'is_verified']
     search_fields = ['phone', 'name', 'referral_code']
     readonly_fields = ['referral_code', 'created_at', 'last_login']
-    inlines = [UserUploadedPDFInline, UserUploadedTopicInline, UserUploadedSubjectInline]
+    inlines = [UserUploadedPDFInline, UserUploadedTopicInline, UserUploadedSubjectInline, UserTopicUsageInline]
     fields = ['phone', 'name', 'is_verified', 'is_active', 'first_opened_at', 'pdf_views_count', 'days_since_install',
               'referral_code', 'referred_by', 'created_at', 'last_login']
 
@@ -1004,7 +1025,10 @@ class PDFFileAdmin(IntegrityErrorMixin, admin.ModelAdmin):
 
 @admin.register(Topic)
 class TopicAdmin(IntegrityErrorMixin, admin.ModelAdmin):
-    list_display = ['id', 'name', 'uploaded_by_display', 'is_approved', 'created_at']
+    list_display = [
+        'id', 'name', 'uploaded_by_display', 'total_usage_display', 'unique_users_display',
+        'is_approved', 'created_at',
+    ]
     list_filter = ['is_approved']
     search_fields = ['name', 'uploaded_by__phone', 'uploaded_by__name']
     list_editable = ['is_approved']
@@ -1016,6 +1040,20 @@ class TopicAdmin(IntegrityErrorMixin, admin.ModelAdmin):
         u = obj.uploaded_by
         return f'{getattr(u, "name", "") or u.phone} ({u.phone})'
     uploaded_by_display.short_description = 'Uploaded by'
+
+    def total_usage_display(self, obj):
+        if not obj.pk:
+            return '—'
+        total = UserTopicUsage.objects.filter(topic=obj).aggregate(s=Sum('usage_count'))['s'] or 0
+        mins = UserTopicUsage.objects.filter(topic=obj).aggregate(s=Sum('time_spent_minutes'))['s'] or 0
+        return f'{total} opens, {mins} min'
+    total_usage_display.short_description = 'Topic usage'
+
+    def unique_users_display(self, obj):
+        if not obj.pk:
+            return '—'
+        return UserTopicUsage.objects.filter(topic=obj).values('user').distinct().count()
+    unique_users_display.short_description = 'Unique users'
 
     @admin.action(description='Approve selected topics')
     def approve_topics(self, request, queryset):
@@ -1054,8 +1092,53 @@ class SubjectAdmin(IntegrityErrorMixin, admin.ModelAdmin):
         self.message_user(request, f'{updated} subject(s) rejected.')
 
 
-# Simple registrations
-admin.site.register(Feedback)
+class FeedbackAdminForm(forms.ModelForm):
+    """Validate user exists so we don't hit FOREIGN KEY constraint on save."""
+    class Meta:
+        model = Feedback
+        fields = '__all__'
+
+    def clean_user(self):
+        user = self.cleaned_data.get('user')
+        if user is not None and not User.objects.filter(pk=user.pk).exists():
+            raise forms.ValidationError(
+                'The selected user no longer exists (may have been deleted). '
+                'Leave empty or choose another user.'
+            )
+        return user
+
+
+@admin.register(Feedback)
+class FeedbackAdmin(IntegrityErrorMixin, admin.ModelAdmin):
+    form = FeedbackAdminForm
+    list_display = ['id', 'user_display', 'name', 'description_short', 'created_at']
+    list_filter = ['created_at', 'name']
+    search_fields = ['name', 'description', 'user__phone', 'user__name']
+    readonly_fields = ['created_at']
+    raw_id_fields = ['user']
+
+    def save_model(self, request, obj, form, change):
+        # Avoid FOREIGN KEY constraint: clear user if it no longer exists (e.g. deleted)
+        if obj.user_id is not None and not User.objects.filter(pk=obj.user_id).exists():
+            obj.user_id = None
+            self.message_user(
+                request,
+                'The selected user no longer exists; saved as anonymous feedback.',
+                messages.WARNING
+            )
+        super().save_model(request, obj, form, change)
+
+    def user_display(self, obj):
+        if not obj.user:
+            return '—'
+        return obj.user.name or obj.user.phone
+    user_display.short_description = 'Created by'
+
+    def description_short(self, obj):
+        return (obj.description[:60] + '…') if obj.description and len(obj.description) > 60 else (obj.description or '')
+    description_short.short_description = 'Description'
+
+
 admin.site.register(UserQuery)
 
 
@@ -1091,6 +1174,29 @@ admin.site.register(ReferralReward)
 admin.site.register(UserStreak)
 admin.site.register(UserBookmark)
 admin.site.register(UserActivity)
+
+
+# ========================================
+# USER TOPIC USAGE (which topic user used most – analytics)
+# ========================================
+
+@admin.register(UserTopicUsage)
+class UserTopicUsageAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user_phone', 'topic_name', 'date', 'usage_count', 'time_spent_minutes']
+    list_filter = ['topic', 'date']
+    search_fields = ['user__phone', 'user__name', 'topic__name']
+    readonly_fields = ['user', 'topic', 'date', 'usage_count', 'time_spent_minutes']
+    raw_id_fields = ['user', 'topic']
+    date_hierarchy = 'date'
+    ordering = ['-date', '-usage_count']
+
+    def user_phone(self, obj):
+        return obj.user.phone if obj.user else '—'
+    user_phone.short_description = 'User'
+
+    def topic_name(self, obj):
+        return obj.topic.name if obj.topic else '—'
+    topic_name.short_description = 'Topic'
 
 
 # ========================================
@@ -1195,8 +1301,11 @@ class UserRoutineReminderAdmin(admin.ModelAdmin):
 
 class FeedPostImageInline(admin.TabularInline):
     model = FeedPostImage
-    extra = 0
+    extra = 10
+    max_num = 10
     ordering = ['order']
+    verbose_name = 'Feed post image'
+    verbose_name_plural = 'Feed post images (up to 10)'
 
 
 @admin.register(FeedPost)

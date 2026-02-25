@@ -3,13 +3,15 @@
 from rest_framework import viewsets, generics, status
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model, authenticate
 from django.utils import timezone
+from django.db import IntegrityError
 from django.db.models import Count, Q, F, Sum, Exists, OuterRef
 from django.shortcuts import get_object_or_404
+from django.conf import settings
 from datetime import timedelta
 import random
 
@@ -17,7 +19,7 @@ from .models import *
 from .serializers import *
 from .utils import (
     send_whatsapp_otp, create_auto_groups, update_college_stats,
-    grant_subscription_access, get_pdfs_for_package,
+    grant_subscription_access, grant_package_access, get_pdfs_for_package,
     get_user_active_packages, pdf_covered_by_package,
     get_package_accessible_pdf_ids,
 )
@@ -134,8 +136,8 @@ def forgot_password_send_otp(request):
     otp_code = OTP.generate_otp()
     
     print("\n" + "="*50)
-    print(f"📱 OTP (Forgot Password) FOR: {phone}")
-    print(f"🔐 OTP CODE: {otp_code}")
+    print("[OTP] Forgot Password for: %s" % phone)
+    print("[OTP] Code: %s" % otp_code)
     print("="*50 + "\n")
     
     OTP.objects.create(phone=phone, otp=otp_code)
@@ -303,14 +305,9 @@ def verify_payment(request):
                 pdf=payment.purchased_pdf,
                 defaults={'payment': payment}
             )
-        elif payment.payment_type in ('SUBJECT_PACKAGE', 'TOPIC_PACKAGE', 'YEAR_PACKAGE', 'FULL_PACKAGE') and payment.purchased_package:
-            for pdf in get_pdfs_for_package(payment.purchased_package):
-                PdfAccess.objects.get_or_create(
-                    user=payment.user,
-                    pdf=pdf,
-                    defaults={'payment': payment}
-                )
-        
+        else:
+            grant_package_access(payment)
+
         return Response({
             'message': 'Payment approved and access granted',
             'payment': PaymentSerializer(payment).data
@@ -821,6 +818,7 @@ def usage_log(request):
     seconds = data.get('time_spent_seconds', 0)
     minutes += (seconds + 59) // 60  # convert seconds to minutes (round up)
     pdfs_viewed = data.get('pdfs_viewed', 0)
+    topic_usage_list = data.get('topic_usage') or []
 
     today = timezone.now().date()
     activity, created = UserActivity.objects.get_or_create(
@@ -831,6 +829,29 @@ def usage_log(request):
     activity.time_spent_minutes += minutes
     activity.pdfs_viewed += pdfs_viewed
     activity.save(update_fields=['time_spent_minutes', 'pdfs_viewed'])
+
+    # Keep User.pdf_views_count in sync for admin "total PDF views per user"
+    if pdfs_viewed > 0:
+        User.objects.filter(pk=request.user.pk).update(pdf_views_count=F('pdf_views_count') + pdfs_viewed)
+
+    # Save per-topic usage (which topic user used – for admin analytics)
+    for item in topic_usage_list:
+        topic_id = item.get('topic_id')
+        usage_count = item.get('usage_count', 1)
+        time_spent = item.get('time_spent_minutes', 0)
+        try:
+            topic = Topic.objects.get(pk=topic_id, is_approved=True)
+        except Topic.DoesNotExist:
+            continue
+        utu, created_utu = UserTopicUsage.objects.get_or_create(
+            user=request.user,
+            topic=topic,
+            date=today,
+            defaults={'usage_count': 0, 'time_spent_minutes': 0}
+        )
+        utu.usage_count += usage_count
+        utu.time_spent_minutes += time_spent
+        utu.save(update_fields=['usage_count', 'time_spent_minutes'])
 
     return Response({
         'message': 'Usage logged',
@@ -1055,6 +1076,16 @@ class FeedbackCreateView(generics.CreateAPIView):
     serializer_class = FeedbackSerializer
     permission_classes = [AllowAny]
 
+    def perform_create(self, serializer):
+        user = self.request.user if self.request.user.is_authenticated else None
+        try:
+            serializer.save(user=user)
+        except IntegrityError as e:
+            raise ValidationError(
+                'Database constraint failed. A related record (e.g. User) may not exist. '
+                'Please ensure all references are valid. Details: %s' % str(e)
+            ) from e
+
 
 class FeedbackListView(generics.ListAPIView):
     queryset = Feedback.objects.all().order_by('-created_at')
@@ -1272,15 +1303,15 @@ class FeedPostDetailView(generics.RetrieveAPIView):
 class FeedPostCreateView(generics.CreateAPIView):
     """
     POST /api/feed/create/
-    Create a TU Notice post (multipart: images [up to 5], title, description). Status = PENDING until admin approves.
+    Create a TU Notice post (multipart: images [up to 10], title, description). Status = PENDING until admin approves.
     """
     serializer_class = FeedPostCreateSerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
         post = serializer.save(created_by=self.request.user, status='PENDING')
-        # Accept up to 5 images via multipart field 'images' (multiple files)
-        for order, file in enumerate(self.request.FILES.getlist('images')[:5]):
+        # Accept up to 10 images via multipart field 'images' (multiple files)
+        for order, file in enumerate(self.request.FILES.getlist('images')[:10]):
             FeedPostImage.objects.create(post=post, image=file, order=order)
 
 

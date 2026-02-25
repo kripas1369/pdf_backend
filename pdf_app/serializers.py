@@ -405,13 +405,15 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
     purchased_package = serializers.PrimaryKeyRelatedField(
         queryset=PDFPackage.objects.filter(is_active=True), required=False, allow_null=True
     )
+    # Accept purchased_package_id so clients can send either key (e.g. form-data as purchased_package_id)
+    purchased_package_id = serializers.IntegerField(required=False, allow_null=True)
 
     class Meta:
         model = Payment
         fields = [
             'payment_type', 'amount', 'tier',
             'screenshot', 'payment_method', 'transaction_note',
-            'purchased_pdf', 'purchased_package'
+            'purchased_pdf', 'purchased_package', 'purchased_package_id'
         ]
 
     def validate_screenshot(self, value):
@@ -422,6 +424,16 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        # Let clients send either purchased_package (pk) or purchased_package_id
+        pkg_id = attrs.pop('purchased_package_id', None)
+        if attrs.get('purchased_package') is None and pkg_id is not None:
+            try:
+                attrs['purchased_package'] = PDFPackage.objects.get(pk=pkg_id, is_active=True)
+            except (PDFPackage.DoesNotExist, ValueError, TypeError):
+                raise serializers.ValidationError({
+                    'purchased_package': f'No active package found with id {pkg_id}.'
+                })
+
         payment_type = attrs.get('payment_type')
         if payment_type == 'SINGLE_PDF':
             if not attrs.get('purchased_pdf'):
@@ -433,7 +445,7 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
         elif payment_type in ('SUBJECT_PACKAGE', 'TOPIC_PACKAGE', 'YEAR_PACKAGE', 'FULL_PACKAGE'):
             if not attrs.get('purchased_package'):
                 raise serializers.ValidationError({
-                    'purchased_package': 'This field is required when payment_type is SUBJECT_PACKAGE, TOPIC_PACKAGE, YEAR_PACKAGE, or FULL_PACKAGE.'
+                    'purchased_package': 'This field is required when payment_type is SUBJECT_PACKAGE, TOPIC_PACKAGE, YEAR_PACKAGE, or FULL_PACKAGE. Send purchased_package or purchased_package_id.'
                 })
             pkg = attrs['purchased_package']
             type_map = {'SUBJECT_PACKAGE': 'SUBJECT', 'TOPIC_PACKAGE': 'TOPIC', 'YEAR_PACKAGE': 'YEAR', 'FULL_PACKAGE': 'ALL_YEARS'}
@@ -713,16 +725,35 @@ class UserActivitySerializer(serializers.ModelSerializer):
         fields = ['date', 'pdfs_viewed', 'messages_sent', 'time_spent_minutes']
 
 
+class TopicUsageItemSerializer(serializers.Serializer):
+    """One item in topic_usage: which topic and how much it was used."""
+    topic_id = serializers.IntegerField(min_value=1)
+    usage_count = serializers.IntegerField(min_value=0, max_value=10000, default=1)
+    time_spent_minutes = serializers.IntegerField(min_value=0, max_value=1440, default=0, required=False)
+
+
 class UsageLogSerializer(serializers.Serializer):
     """POST /api/usage/log/ - report app usage from Flutter."""
     time_spent_minutes = serializers.IntegerField(min_value=0, max_value=1440, default=0, help_text='Minutes spent in app in this session')
     time_spent_seconds = serializers.IntegerField(min_value=0, max_value=86400, required=False, help_text='Alternative: seconds spent (converted to minutes)')
     pdfs_viewed = serializers.IntegerField(min_value=0, max_value=1000, default=0, help_text='Optional: number of PDFs viewed in this session to add')
+    topic_usage = TopicUsageItemSerializer(many=True, required=False, help_text='List of { topic_id, usage_count, time_spent_minutes? } for topic usage tracking')
 
     def validate(self, data):
-        if data.get('time_spent_minutes', 0) == 0 and data.get('time_spent_seconds', 0) == 0 and data.get('pdfs_viewed', 0) == 0:
-            raise serializers.ValidationError('Send at least one of time_spent_minutes, time_spent_seconds, or pdfs_viewed.')
+        if data.get('time_spent_minutes', 0) == 0 and data.get('time_spent_seconds', 0) == 0 and data.get('pdfs_viewed', 0) == 0 and not data.get('topic_usage'):
+            raise serializers.ValidationError('Send at least one of time_spent_minutes, time_spent_seconds, pdfs_viewed, or topic_usage.')
         return data
+
+    def validate_topic_usage(self, value):
+        if not value:
+            return value
+        seen = set()
+        for item in value:
+            tid = item.get('topic_id')
+            if tid in seen:
+                raise serializers.ValidationError('Duplicate topic_id in topic_usage.')
+            seen.add(tid)
+        return value
 
 
 # ============================================
@@ -730,9 +761,17 @@ class UsageLogSerializer(serializers.Serializer):
 # ============================================
 
 class FeedbackSerializer(serializers.ModelSerializer):
+    user_display = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Feedback
-        fields = ['id', 'name', 'description', 'created_at']
+        fields = ['id', 'user', 'user_display', 'name', 'description', 'created_at']
+        read_only_fields = ['user', 'user_display', 'created_at']
+
+    def get_user_display(self, obj):
+        if not obj.user:
+            return None
+        return obj.user.name or obj.user.phone or str(obj.user_id)
 
 
 class UserQuerySerializer(serializers.ModelSerializer):
@@ -867,7 +906,7 @@ class FeedPostSerializer(serializers.ModelSerializer):
         return []
 
     def get_image_urls(self, obj):
-        """List of up to 5 image URLs for this post."""
+        """List of up to 10 image URLs for this post."""
         return self._get_image_url_list(obj)
 
     def get_like_count(self, obj):
@@ -904,7 +943,7 @@ class FeedPostSerializer(serializers.ModelSerializer):
 
 
 class FeedPostCreateSerializer(serializers.ModelSerializer):
-    """Create a TU Notice post (up to 5 images + text). Status will be PENDING until admin approves. Send images as multipart field 'images' (multiple files)."""
+    """Create a TU Notice post (up to 10 images + text). Status will be PENDING until admin approves. Send images as multipart field 'images' (multiple files)."""
     class Meta:
         model = FeedPost
         fields = ['title', 'description']

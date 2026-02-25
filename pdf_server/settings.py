@@ -184,9 +184,9 @@ USE_I18N = True
 USE_TZ = True
 
 # ========================================
-# OTP (forgot password) – 3rd party SMS API later
+# OTP (forgot password) – AakashSMS (aakashsms.com)
 # ========================================
-# Set to True to print OTP in terminal (useful when no SMS provider is configured)
+AAKASHSMS_AUTH_TOKEN = '507a82181f03d61c97698a6b480182947f52ef880377cc739bb394be62e52e09'
 DEBUG_PRINT_OTP = True
 
 
