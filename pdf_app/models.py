@@ -82,6 +82,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_login = models.DateTimeField(null=True, blank=True)
+    last_seen = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Updated by app heartbeat; used for active-online count.',
+    )
     
     objects = CustomUserManager()
     
@@ -102,6 +107,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         indexes = [
             models.Index(fields=['phone']),
             models.Index(fields=['referral_code']),
+            models.Index(fields=['last_seen']),
         ]
 
 

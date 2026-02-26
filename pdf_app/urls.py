@@ -84,6 +84,17 @@ urlpatterns = [
     path('bookmarks/', views.get_bookmarks, name='get-bookmarks'),
 
     # ========================================
+    # PRESENCE (active online users)
+    # ========================================
+    path('presence/heartbeat/', views.presence_heartbeat, name='presence-heartbeat'),
+    path('presence/active-count/', views.presence_active_count, name='presence-active-count'),
+
+    # ========================================
+    # PDF TIME LEADERBOARD
+    # ========================================
+    path('leaderboard/pdf-time/', views.leaderboard_pdf_time, name='leaderboard-pdf-time'),
+
+    # ========================================
     # USAGE / APP TIME TRACKING
     # ========================================
     path('usage/log/', views.usage_log, name='usage-log'),

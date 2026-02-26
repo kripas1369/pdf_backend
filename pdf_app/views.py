@@ -821,6 +821,9 @@ def usage_log(request):
     topic_usage_list = data.get('topic_usage') or []
 
     today = timezone.now().date()
+    # Update last_seen so user is counted as "online" when they send usage
+    User.objects.filter(pk=request.user.pk).update(last_seen=timezone.now())
+
     activity, created = UserActivity.objects.get_or_create(
         user=request.user,
         date=today,
@@ -858,6 +861,86 @@ def usage_log(request):
         'today_minutes': activity.time_spent_minutes,
         'today_pdfs_viewed': activity.pdfs_viewed,
     }, status=status.HTTP_201_CREATED)
+
+
+# ============================================
+# PRESENCE (active online users)
+# ============================================
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def presence_heartbeat(request):
+    """
+    Call when the app is in foreground so the user is counted as "online".
+    Flutter should call this every 1–2 minutes while the app is open.
+    Updates request.user.last_seen.
+    """
+    request.user.last_seen = timezone.now()
+    request.user.save(update_fields=['last_seen'])
+    return Response({'status': 'ok'})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def presence_active_count(request):
+    """
+    Get count of users currently considered "online" (last_seen in the last N minutes).
+    Query params: minutes (default 5).
+    """
+    minutes = min(60, max(1, int(request.query_params.get('minutes', 5))))
+    since = timezone.now() - timedelta(minutes=minutes)
+    count = User.objects.filter(last_seen__gte=since, is_active=True).count()
+    return Response({'active_count': count})
+
+
+# ============================================
+# PDF TIME LEADERBOARD
+# ============================================
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def leaderboard_pdf_time(request):
+    """
+    Leaderboard of users by total time spent in app (PDF reading).
+    Query params: limit (default 50, max 100), period=all|week|month.
+    Returns: [{ rank, display_name, total_minutes, total_pdfs_viewed, is_verified }].
+    """
+    limit = min(100, max(1, int(request.query_params.get('limit', 50))))
+    period = (request.query_params.get('period') or 'all').strip().lower()
+    if period not in ('all', 'week', 'month'):
+        period = 'all'
+
+    today = timezone.now().date()
+    if period == 'week':
+        start_date = today - timedelta(days=7)
+    elif period == 'month':
+        start_date = today - timedelta(days=30)
+    else:
+        start_date = None
+
+    if start_date:
+        qs = User.objects.filter(is_active=True).annotate(
+            total_minutes=Sum('activities__time_spent_minutes', filter=Q(activities__date__gte=start_date)),
+            total_pdfs=Sum('activities__pdfs_viewed', filter=Q(activities__date__gte=start_date)),
+        )
+    else:
+        qs = User.objects.filter(is_active=True).annotate(
+            total_minutes=Sum('activities__time_spent_minutes'),
+            total_pdfs=Sum('activities__pdfs_viewed'),
+        )
+
+    qs = qs.filter(total_minutes__gte=1).order_by('-total_minutes')[:limit]
+
+    result = []
+    for idx, user in enumerate(qs, 1):
+        result.append({
+            'rank': idx,
+            'display_name': (user.name or '').strip() or 'Anonymous',
+            'total_minutes': user.total_minutes or 0,
+            'total_pdfs_viewed': user.total_pdfs or 0,
+            'is_verified': getattr(user, 'is_verified', False),
+        })
+    return Response(result)
 
 
 @api_view(['GET'])
