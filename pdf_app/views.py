@@ -972,6 +972,54 @@ def usage_summary(request):
 # EXISTING VIEWS (KEEP AS IS)
 # ============================================
 
+def _topic_program_and_year(topic):
+    """Derive program and year_label from topic. Uses topic.program/year_label if set, else parses from name (e.g. 'BBS 1st Year')."""
+    if topic.program or topic.year_label:
+        return (topic.program.strip() or topic.name, topic.year_label.strip())
+    parts = (topic.name or '').strip().split(None, 1)
+    program = parts[0] if parts else topic.name or ''
+    year_label = parts[1] if len(parts) > 1 else ''
+    return (program, year_label)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def topics_grouped_by_program(request):
+    """
+    GET /api/topics/grouped-by-program/
+    Returns programs (BBS, BSC, BBA, ...) each with a list of topics (years).
+    Use in Flutter: show programs first; on tap show 1st, 2nd, 3rd year (topics) for that program.
+    """
+    topics = list(Topic.objects.filter(is_approved=True).order_by('name'))
+    # Group by program (use program field or derive from name)
+    groups = {}
+    for t in topics:
+        program, year_label = _topic_program_and_year(t)
+        if not program:
+            program = t.name or 'Other'
+        if program not in groups:
+            groups[program] = []
+        groups[program].append({
+            'id': t.id,
+            'name': t.name,
+            'year_label': year_label or t.name,
+        })
+    # Sort programs; within each program sort by year_label (1st, 2nd, 3rd order)
+    year_order = {'1st': 0, '2nd': 1, '3rd': 2, '4th': 3, 'first': 0, 'second': 1, 'third': 2, 'fourth': 3}
+    def sort_key(item):
+        y = (item['year_label'] or '').lower()
+        for k, v in year_order.items():
+            if k in y:
+                return (v, item['year_label'])
+        return (99, item['year_label'])
+    result = []
+    for program in sorted(groups.keys(), key=str.lower):
+        items = sorted(groups[program], key=sort_key)
+        result.append({'program': program, 'topics': items})
+    serializer = ProgramWithTopicsSerializer(result, many=True)
+    return Response(serializer.data)
+
+
 class TopicViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = TopicSerializer
     permission_classes = [AllowAny]

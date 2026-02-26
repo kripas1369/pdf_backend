@@ -277,9 +277,23 @@ class MyPDFUploadSerializer(serializers.ModelSerializer):
 
 
 class TopicSerializer(serializers.ModelSerializer):
+    """Flat topic list (id, name). For grouped program → years use /api/topics/grouped-by-program/."""
     class Meta:
         model = Topic
-        fields = ['id', 'name']
+        fields = ['id', 'name', 'program', 'year_label']
+
+
+class TopicGroupedSerializer(serializers.Serializer):
+    """One topic inside a program group (for grouped-by-program API)."""
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    year_label = serializers.CharField(allow_blank=True)
+
+
+class ProgramWithTopicsSerializer(serializers.Serializer):
+    """Program name with list of topics (years) for two-level UI."""
+    program = serializers.CharField()
+    topics = TopicGroupedSerializer(many=True)
 
 
 class TopicCreateSerializer(serializers.ModelSerializer):

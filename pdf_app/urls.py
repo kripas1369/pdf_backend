@@ -15,6 +15,8 @@ router = DefaultRouter()
 router.register(r'topics', views.TopicViewSet, basename='topic')
 
 urlpatterns = [
+    # Topic grouped by program (must be before router so /topics/grouped-by-program/ is matched)
+    path('topics/grouped-by-program/', views.topics_grouped_by_program, name='topics-grouped-by-program'),
     # Router URLs
     path('', include(router.urls)),
     

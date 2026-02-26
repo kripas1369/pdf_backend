@@ -157,6 +157,18 @@ class Topic(models.Model):
     """Academic topics (TU, PU, etc.). Students can suggest new topics; admin approves."""
     
     name = models.CharField(max_length=100, unique=True)
+    # For two-level UI: show programs (BBS, BSC, BBA) first, then years (1st, 2nd) on tap.
+    program = models.CharField(
+        max_length=50,
+        blank=True,
+        db_index=True,
+        help_text='Program/course group (e.g. BBS, BSC, BBA). Used to group topics in app.',
+    )
+    year_label = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='Year display (e.g. 1st Year, 2nd Year). Shown under program when user taps.',
+    )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

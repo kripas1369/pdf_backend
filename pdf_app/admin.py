@@ -1026,11 +1026,11 @@ class PDFFileAdmin(IntegrityErrorMixin, admin.ModelAdmin):
 @admin.register(Topic)
 class TopicAdmin(IntegrityErrorMixin, admin.ModelAdmin):
     list_display = [
-        'id', 'name', 'uploaded_by_display', 'total_usage_display', 'unique_users_display',
+        'id', 'name', 'program', 'year_label', 'uploaded_by_display', 'total_usage_display', 'unique_users_display',
         'is_approved', 'created_at',
     ]
-    list_filter = ['is_approved']
-    search_fields = ['name', 'uploaded_by__phone', 'uploaded_by__name']
+    list_filter = ['is_approved', 'program']
+    search_fields = ['name', 'program', 'year_label', 'uploaded_by__phone', 'uploaded_by__name']
     list_editable = ['is_approved']
     actions = ['approve_topics', 'reject_topics']
 
